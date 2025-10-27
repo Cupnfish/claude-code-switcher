@@ -37,6 +37,12 @@ cargo install claude-code-switcher
 # 应用智普 GLM 模板（强烈推荐）
 ccs apply glm
 
+# 应用 MiniMax Anthropic 模板（推荐）
+ccs apply minimax
+
+# 应用 MiniMax OpenAI 模板
+ccs apply minimax-openai
+
 # 应用 DeepSeek 模板
 ccs apply deepseek
 
@@ -75,6 +81,9 @@ ccs delete my-config
 # 智普 GLM（推荐）
 export Z_AI_API_KEY="your_api_key_here"
 
+# MiniMax
+export MINIMAX_API_KEY="your_api_key_here"
+
 # DeepSeek
 export DEEPSEEK_API_KEY="your_api_key_here"
 
@@ -95,6 +104,14 @@ export LONGCAT_API_KEY="your_api_key_here"
 - 💰 **性价比高**：有编程套餐，便宜好用
 - 🚀 **性能优秀**：响应速度快，代码生成质量高
 - 📊 **上下文充足**：支持200k上下文长度
+
+### 🔥 MiniMax（推荐）
+
+MiniMax 是另一个优秀的选择，支持兼容的 API：
+- 💰 **性价比高**：提供有竞争力的价格
+- 🚀 **性能优秀**：响应速度快，支持流式输出和函数调用
+- 📊 **API 兼容**：支持 Anthropic 和 OpenAI 两种 API 格式
+- 🔧 **功能丰富**：支持工具调用、流式响应等高级功能
 
 ### 其他选择
 

@@ -19,6 +19,7 @@ Examples:
     ccs snap my-env         # Create snapshot of current settings
     ccs apply my-env        # Apply snapshot to current project
     ccs apply deepseek      # Apply DeepSeek template
+    ccs apply minimax       # Apply MiniMax Anthropic template
     ccs ls -v               # List snapshots with details"
 )]
 #[command(version = "0.1.0")]
@@ -68,7 +69,7 @@ enum Commands {
     /// Apply a snapshot or template [alias: a]
     #[command(alias = "a")]
     Apply {
-        /// Snapshot name or template type (deepseek, glm, k2sonnet, longcat)
+        /// Snapshot name or template type (deepseek, glm, k2, longcat, minimax)
         target: String,
 
         /// What to include in the snapshot (default: common)
@@ -249,9 +250,10 @@ enum SnapshotScope {
 #[clap(rename_all = "lowercase")]
 enum TemplateType {
     DeepSeek,
-    K2Sonnet,
+    K2,
     Longcat,
     Zai,
+    MiniMax,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, clap::ValueEnum)]
@@ -309,9 +311,10 @@ impl std::fmt::Display for TemplateType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TemplateType::DeepSeek => write!(f, "deepseek"),
-            TemplateType::K2Sonnet => write!(f, "k2sonnet"),
+            TemplateType::K2 => write!(f, "k2"),
             TemplateType::Longcat => write!(f, "longcat"),
             TemplateType::Zai => write!(f, "zai"),
+            TemplateType::MiniMax => write!(f, "minimax"),
         }
     }
 }
@@ -454,8 +457,9 @@ fn get_template_type(target: &str) -> Option<TemplateType> {
     match target.to_lowercase().as_str() {
         "deepseek" | "ds" => Some(TemplateType::DeepSeek),
         "glm" | "zhipu" | "zai" => Some(TemplateType::Zai),
-        "k2sonnet" | "k2" => Some(TemplateType::K2Sonnet),
+        "k2" | "moonshot" => Some(TemplateType::K2),
         "longcat" => Some(TemplateType::Longcat),
+        "minimax" | "minimax-anthropic" => Some(TemplateType::MiniMax),
         _ => None,
     }
 }
@@ -583,65 +587,6 @@ fn create_zai_template(api_key: &str, region: &ZaiRegion) -> ClaudeSettings {
     }
 }
 
-fn create_k2sonnet_template(api_key: &str) -> ClaudeSettings {
-    let mut env = std::collections::HashMap::new();
-    env.insert(
-        "ANTHROPIC_BASE_URL".to_string(),
-        "https://claudecode.epiphanymind.com/api/claudecode".to_string(),
-    );
-    env.insert("ANTHROPIC_API_KEY".to_string(), api_key.to_string());
-    env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.to_string());
-    env.insert("API_TIMEOUT_MS".to_string(), "600000".to_string());
-    env.insert("ANTHROPIC_MODEL".to_string(), "k2sonnet-chat".to_string());
-    env.insert(
-        "ANTHROPIC_SMALL_FAST_MODEL".to_string(),
-        "k2sonnet-chat".to_string(),
-    );
-    env.insert(
-        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),
-        "1".to_string(),
-    );
-
-    let permissions = Permissions {
-        allow: Some(vec![
-            "Bash".to_string(),
-            "Read".to_string(),
-            "Write".to_string(),
-            "Edit".to_string(),
-            "MultiEdit".to_string(),
-            "Glob".to_string(),
-            "Grep".to_string(),
-            "WebFetch".to_string(),
-        ]),
-        ask: None,
-        deny: Some(vec!["WebSearch".to_string()]),
-        additional_directories: None,
-        default_mode: None,
-        disable_bypass_permissions_mode: None,
-    };
-
-    ClaudeSettings {
-        env: Some(env),
-        model: Some("k2sonnet-chat".to_string()),
-        output_style: None,
-        include_co_authored_by: Some(true),
-        permissions: Some(permissions),
-        hooks: None,
-        api_key_helper: None,
-        cleanup_period_days: None,
-        disable_all_hooks: None,
-        force_login_method: None,
-        force_login_org_uuid: None,
-        enable_all_project_mcp_servers: None,
-        enabled_mcpjson_servers: None,
-        disabled_mcpjson_servers: None,
-        aws_auth_refresh: None,
-        aws_credential_export: None,
-        status_line: None,
-        subagent_model: None,
-    }
-}
-
 fn create_longcat_template(api_key: &str, _think: bool) -> ClaudeSettings {
     let mut env = std::collections::HashMap::new();
     env.insert(
@@ -710,13 +655,143 @@ fn create_longcat_template(api_key: &str, _think: bool) -> ClaudeSettings {
     }
 }
 
+fn create_minimax_template(api_key: &str) -> ClaudeSettings {
+    let mut env = std::collections::HashMap::new();
+    env.insert(
+        "ANTHROPIC_BASE_URL".to_string(),
+        "https://api.minimax.io/anthropic".to_string(),
+    );
+    env.insert("ANTHROPIC_API_KEY".to_string(), api_key.to_string());
+    env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.to_string());
+    env.insert("ANTHROPIC_MODEL".to_string(), "MiniMax-M2".to_string());
+    env.insert(
+        "ANTHROPIC_SMALL_FAST_MODEL".to_string(),
+        "MiniMax-M2".to_string(),
+    );
+    env.insert(
+        "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
+        "MiniMax-M2".to_string(),
+    );
+    env.insert("API_TIMEOUT_MS".to_string(), "600000".to_string());
+    env.insert(
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),
+        "1".to_string(),
+    );
+
+    let permissions = Permissions {
+        allow: Some(vec![
+            "Bash".to_string(),
+            "Read".to_string(),
+            "Write".to_string(),
+            "Edit".to_string(),
+            "MultiEdit".to_string(),
+            "Glob".to_string(),
+            "Grep".to_string(),
+            "WebFetch".to_string(),
+        ]),
+        ask: None,
+        deny: Some(vec!["WebSearch".to_string()]),
+        additional_directories: None,
+        default_mode: None,
+        disable_bypass_permissions_mode: None,
+    };
+
+    ClaudeSettings {
+        env: Some(env),
+        model: Some("MiniMax-M2".to_string()),
+        output_style: None,
+        include_co_authored_by: Some(true),
+        permissions: Some(permissions),
+        hooks: None,
+        api_key_helper: None,
+        cleanup_period_days: None,
+        disable_all_hooks: None,
+        force_login_method: None,
+        force_login_org_uuid: None,
+        enable_all_project_mcp_servers: None,
+        enabled_mcpjson_servers: None,
+        disabled_mcpjson_servers: None,
+        aws_auth_refresh: None,
+        aws_credential_export: None,
+        status_line: None,
+        subagent_model: None,
+    }
+}
+
+fn create_k2_template(api_key: &str) -> ClaudeSettings {
+    let mut env = std::collections::HashMap::new();
+    env.insert(
+        "ANTHROPIC_BASE_URL".to_string(),
+        "https://api.moonshot.cn/v1".to_string(),
+    );
+    env.insert("ANTHROPIC_API_KEY".to_string(), api_key.to_string());
+    env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.to_string());
+    env.insert(
+        "ANTHROPIC_MODEL".to_string(),
+        "kimi-k2-0905-preview".to_string(),
+    );
+    env.insert(
+        "ANTHROPIC_SMALL_FAST_MODEL".to_string(),
+        "kimi-k2-0905-preview".to_string(),
+    );
+    env.insert(
+        "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
+        "kimi-k2-0905-preview".to_string(),
+    );
+    env.insert("API_TIMEOUT_MS".to_string(), "600000".to_string());
+    env.insert(
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),
+        "1".to_string(),
+    );
+
+    let permissions = Permissions {
+        allow: Some(vec![
+            "Bash".to_string(),
+            "Read".to_string(),
+            "Write".to_string(),
+            "Edit".to_string(),
+            "MultiEdit".to_string(),
+            "Glob".to_string(),
+            "Grep".to_string(),
+            "WebFetch".to_string(),
+        ]),
+        ask: None,
+        deny: Some(vec!["WebSearch".to_string()]),
+        additional_directories: None,
+        default_mode: None,
+        disable_bypass_permissions_mode: None,
+    };
+
+    ClaudeSettings {
+        env: Some(env),
+        model: Some("kimi-k2-0905-preview".to_string()),
+        output_style: None,
+        include_co_authored_by: Some(true),
+        permissions: Some(permissions),
+        hooks: None,
+        api_key_helper: None,
+        cleanup_period_days: None,
+        disable_all_hooks: None,
+        force_login_method: None,
+        force_login_org_uuid: None,
+        enable_all_project_mcp_servers: None,
+        enabled_mcpjson_servers: None,
+        disabled_mcpjson_servers: None,
+        aws_auth_refresh: None,
+        aws_credential_export: None,
+        status_line: None,
+        subagent_model: None,
+    }
+}
+
 fn get_template_api_key(template: &TemplateType) -> Result<String> {
     // Try to get from environment first
     let env_var = match template {
         TemplateType::DeepSeek => "DEEPSEEK_API_KEY",
         TemplateType::Zai => "Z_AI_API_KEY",
-        TemplateType::K2Sonnet => "K2_SONNET_API_KEY",
+        TemplateType::K2 => "MOONSHOT_API_KEY",
         TemplateType::Longcat => "LONGCAT_API_KEY",
+        TemplateType::MiniMax => "MINIMAX_API_KEY",
     };
 
     if let Ok(key) = std::env::var(env_var) {
@@ -774,8 +849,9 @@ fn apply_template(
     let mut template_settings = match template {
         TemplateType::DeepSeek => create_deepseek_template(&api_key),
         TemplateType::Zai => create_zai_template(&api_key, &ZaiRegion::China),
-        TemplateType::K2Sonnet => create_k2sonnet_template(&api_key),
+        TemplateType::K2 => create_k2_template(&api_key),
         TemplateType::Longcat => create_longcat_template(&api_key, false),
+        TemplateType::MiniMax => create_minimax_template(&api_key),
     };
 
     // Apply model override if specified
@@ -1510,14 +1586,17 @@ fn list_command(verbose: bool) -> Result<()> {
 
     // Show available templates
     println!("\n🎯 Available templates (use 'ccs apply <template>'):");
-    println!("  🚀 deepseek   - DeepSeek Chat API");
-    println!("  🤖 glm        - GLM/Zhipu AI");
-    println!("  ⚡ k2sonnet   - K2 Sonnet API");
-    println!("  🐱 longcat    - Longcat Chat API");
+    println!("  🚀 deepseek          - DeepSeek Chat API");
+    println!("  🤖 glm               - GLM/Zhipu AI");
+    println!("  🌙 k2                - Moonshot K2 API");
+    println!("  🐱 longcat           - Longcat Chat API");
+    println!("  🔥 minimax           - MiniMax API (recommended)");
 
     println!("\n💡 Examples:");
     println!("  ccs apply deepseek                    # Apply DeepSeek template");
     println!("  ccs apply glm --model glm-4-plus     # Apply GLM with custom model");
+    println!("  ccs apply k2                          # Apply Moonshot K2 template");
+    println!("  ccs apply minimax                     # Apply MiniMax template");
     println!("  ccs apply my-snapshot --backup       # Apply snapshot with backup");
 
     Ok(())
