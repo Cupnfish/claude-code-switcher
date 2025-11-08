@@ -46,6 +46,12 @@ ccs apply minimax-openai
 # 应用 DeepSeek 模板
 ccs apply deepseek
 
+# 应用 Kimi For Coding 模板
+ccs apply kimi
+
+# 应用 Moonshot K2 Thinking 模板
+ccs apply k2-thinking
+
 # 应用 K2Sonnet 模板
 ccs apply k2sonnet
 
@@ -87,6 +93,9 @@ export MINIMAX_API_KEY="your_api_key_here"
 # DeepSeek
 export DEEPSEEK_API_KEY="your_api_key_here"
 
+# Kimi For Coding
+export KIMI_API_KEY="your_api_key_here"
+
 # K2Sonnet
 export K2_SONNET_API_KEY="your_api_key_here"
 
@@ -115,6 +124,7 @@ MiniMax 是另一个优秀的选择，支持兼容的 API：
 
 ### 其他选择
 
+- **Kimi For Coding**：月之暗面的编程专用模型，支持思考模式，响应速度快
 - **DeepSeek**：价格便宜，但上下文长度有限（目前128k）
 - **K2Sonnet**：平衡的性能和价格
 - **Longcat**：特定的优化模型

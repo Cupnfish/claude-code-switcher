@@ -69,7 +69,7 @@ enum Commands {
     /// Apply a snapshot or template [alias: a]
     #[command(alias = "a")]
     Apply {
-        /// Snapshot name or template type (deepseek, glm, k2, longcat, minimax)
+        /// Snapshot name or template type (deepseek, glm, k2, k2-thinking, kimi, longcat, minimax)
         target: String,
 
         /// What to include in the snapshot (default: common)
@@ -251,6 +251,8 @@ enum SnapshotScope {
 enum TemplateType {
     DeepSeek,
     K2,
+    K2Thinking,
+    Kimi,
     Longcat,
     Zai,
     MiniMax,
@@ -312,6 +314,8 @@ impl std::fmt::Display for TemplateType {
         match self {
             TemplateType::DeepSeek => write!(f, "deepseek"),
             TemplateType::K2 => write!(f, "k2"),
+            TemplateType::K2Thinking => write!(f, "k2-thinking"),
+            TemplateType::Kimi => write!(f, "kimi"),
             TemplateType::Longcat => write!(f, "longcat"),
             TemplateType::Zai => write!(f, "zai"),
             TemplateType::MiniMax => write!(f, "minimax"),
@@ -458,6 +462,8 @@ fn get_template_type(target: &str) -> Option<TemplateType> {
         "deepseek" | "ds" => Some(TemplateType::DeepSeek),
         "glm" | "zhipu" | "zai" => Some(TemplateType::Zai),
         "k2" | "moonshot" => Some(TemplateType::K2),
+        "k2-thinking" | "k2thinking" => Some(TemplateType::K2Thinking),
+        "kimi" | "kimi-for-coding" => Some(TemplateType::Kimi),
         "longcat" => Some(TemplateType::Longcat),
         "minimax" | "minimax-anthropic" => Some(TemplateType::MiniMax),
         _ => None,
@@ -718,6 +724,125 @@ fn create_minimax_template(api_key: &str) -> ClaudeSettings {
     }
 }
 
+fn create_kimi_template(api_key: &str) -> ClaudeSettings {
+    let mut env = std::collections::HashMap::new();
+    env.insert(
+        "ANTHROPIC_BASE_URL".to_string(),
+        "https://api.kimi.com/coding/".to_string(),
+    );
+    env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.to_string());
+    env.insert("ANTHROPIC_MODEL".to_string(), "kimi-for-coding".to_string());
+    env.insert(
+        "ANTHROPIC_SMALL_FAST_MODEL".to_string(),
+        "kimi-for-coding".to_string(),
+    );
+    env.insert("API_TIMEOUT_MS".to_string(), "600000".to_string());
+    env.insert(
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),
+        "1".to_string(),
+    );
+
+    let permissions = Permissions {
+        allow: Some(vec![
+            "Bash".to_string(),
+            "Read".to_string(),
+            "Write".to_string(),
+            "Edit".to_string(),
+            "MultiEdit".to_string(),
+            "Glob".to_string(),
+            "Grep".to_string(),
+            "WebFetch".to_string(),
+        ]),
+        ask: None,
+        deny: Some(vec!["WebSearch".to_string()]),
+        additional_directories: None,
+        default_mode: None,
+        disable_bypass_permissions_mode: None,
+    };
+
+    ClaudeSettings {
+        env: Some(env),
+        model: Some("kimi-for-coding".to_string()),
+        output_style: None,
+        include_co_authored_by: Some(true),
+        permissions: Some(permissions),
+        hooks: None,
+        api_key_helper: None,
+        cleanup_period_days: None,
+        disable_all_hooks: None,
+        force_login_method: None,
+        force_login_org_uuid: None,
+        enable_all_project_mcp_servers: None,
+        enabled_mcpjson_servers: None,
+        disabled_mcpjson_servers: None,
+        aws_auth_refresh: None,
+        aws_credential_export: None,
+        status_line: None,
+        subagent_model: None,
+    }
+}
+
+fn create_k2_thinking_template(api_key: &str) -> ClaudeSettings {
+    let mut env = std::collections::HashMap::new();
+    env.insert(
+        "ANTHROPIC_BASE_URL".to_string(),
+        "https://api.moonshot.cn/anthropic".to_string(),
+    );
+    env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.to_string());
+    env.insert(
+        "ANTHROPIC_MODEL".to_string(),
+        "kimi-k2-thinking".to_string(),
+    );
+    env.insert(
+        "ANTHROPIC_SMALL_FAST_MODEL".to_string(),
+        "kimi-k2-thinking".to_string(),
+    );
+    env.insert("API_TIMEOUT_MS".to_string(), "600000".to_string());
+    env.insert(
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),
+        "1".to_string(),
+    );
+
+    let permissions = Permissions {
+        allow: Some(vec![
+            "Bash".to_string(),
+            "Read".to_string(),
+            "Write".to_string(),
+            "Edit".to_string(),
+            "MultiEdit".to_string(),
+            "Glob".to_string(),
+            "Grep".to_string(),
+            "WebFetch".to_string(),
+        ]),
+        ask: None,
+        deny: Some(vec!["WebSearch".to_string()]),
+        additional_directories: None,
+        default_mode: None,
+        disable_bypass_permissions_mode: None,
+    };
+
+    ClaudeSettings {
+        env: Some(env),
+        model: Some("kimi-k2-thinking".to_string()),
+        output_style: None,
+        include_co_authored_by: Some(true),
+        permissions: Some(permissions),
+        hooks: None,
+        api_key_helper: None,
+        cleanup_period_days: None,
+        disable_all_hooks: None,
+        force_login_method: None,
+        force_login_org_uuid: None,
+        enable_all_project_mcp_servers: None,
+        enabled_mcpjson_servers: None,
+        disabled_mcpjson_servers: None,
+        aws_auth_refresh: None,
+        aws_credential_export: None,
+        status_line: None,
+        subagent_model: None,
+    }
+}
+
 fn create_k2_template(api_key: &str) -> ClaudeSettings {
     let mut env = std::collections::HashMap::new();
     env.insert(
@@ -790,6 +915,8 @@ fn get_template_api_key(template: &TemplateType) -> Result<String> {
         TemplateType::DeepSeek => "DEEPSEEK_API_KEY",
         TemplateType::Zai => "Z_AI_API_KEY",
         TemplateType::K2 => "MOONSHOT_API_KEY",
+        TemplateType::K2Thinking => "MOONSHOT_API_KEY",
+        TemplateType::Kimi => "KIMI_API_KEY",
         TemplateType::Longcat => "LONGCAT_API_KEY",
         TemplateType::MiniMax => "MINIMAX_API_KEY",
     };
@@ -850,6 +977,8 @@ fn apply_template(
         TemplateType::DeepSeek => create_deepseek_template(&api_key),
         TemplateType::Zai => create_zai_template(&api_key, &ZaiRegion::China),
         TemplateType::K2 => create_k2_template(&api_key),
+        TemplateType::K2Thinking => create_k2_thinking_template(&api_key),
+        TemplateType::Kimi => create_kimi_template(&api_key),
         TemplateType::Longcat => create_longcat_template(&api_key, false),
         TemplateType::MiniMax => create_minimax_template(&api_key),
     };
@@ -1589,6 +1718,8 @@ fn list_command(verbose: bool) -> Result<()> {
     println!("  🚀 deepseek          - DeepSeek Chat API");
     println!("  🤖 glm               - GLM/Zhipu AI");
     println!("  🌙 k2                - Moonshot K2 API");
+    println!("  🧠 k2-thinking       - Moonshot K2 Thinking API (high-speed, 256K context)");
+    println!("  🌟 kimi              - Kimi For Coding API");
     println!("  🐱 longcat           - Longcat Chat API");
     println!("  🔥 minimax           - MiniMax API (recommended)");
 
@@ -1596,6 +1727,8 @@ fn list_command(verbose: bool) -> Result<()> {
     println!("  ccs apply deepseek                    # Apply DeepSeek template");
     println!("  ccs apply glm --model glm-4-plus     # Apply GLM with custom model");
     println!("  ccs apply k2                          # Apply Moonshot K2 template");
+    println!("  ccs apply k2-thinking                  # Apply Moonshot K2 Thinking template");
+    println!("  ccs apply kimi                        # Apply Kimi For Coding template");
     println!("  ccs apply minimax                     # Apply MiniMax template");
     println!("  ccs apply my-snapshot --backup       # Apply snapshot with backup");
 
