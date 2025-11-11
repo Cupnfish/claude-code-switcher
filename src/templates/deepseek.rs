@@ -57,7 +57,10 @@ impl Template for DeepSeekTemplate {
             });
         }
 
-        if matches!(scope, SnapshotScope::Env | SnapshotScope::All) {
+        if matches!(
+            scope,
+            SnapshotScope::Env | SnapshotScope::Common | SnapshotScope::All
+        ) {
             let mut env = HashMap::new();
             env.insert(
                 "ANTHROPIC_BASE_URL".to_string(),

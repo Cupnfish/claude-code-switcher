@@ -217,13 +217,18 @@ fn apply_template_command(
     };
 
     let mut settings = template_instance.create_settings(&api_key, scope);
-
+    // Debug: Print settings before applying
+    println!(
+        "{}",
+        style("DEBUG: Settings to be applied:").yellow().bold()
+    );
+    println!("{}", format_settings_for_display(&settings, true));
     // Override model if specified
     if let Some(model_name) = model {
         settings.model = Some(model_name.clone());
     }
 
-    // Load existing settings and merge
+    // Load existing settings for comparison (will be replaced, not merged)
     let existing_settings = ClaudeSettings::from_file(settings_path)?;
 
     // Backup current settings if requested
@@ -244,9 +249,8 @@ fn apply_template_command(
                 style("Settings are already configured as requested.").green()
             );
             // Even if settings are identical, we still need to save them in case the user
-            // explicitly wanted to ensure these settings are applied
-            let final_settings = settings.merge_with(existing_settings);
-            final_settings.to_file(settings_path)?;
+            // explicitly wanted to ensure these settings are applied (replace mode)
+            settings.to_file(settings_path)?;
             return Ok(());
         }
 
@@ -258,10 +262,8 @@ fn apply_template_command(
         }
     }
 
-    let final_settings = settings.merge_with(existing_settings);
-
-    // Save settings
-    final_settings.to_file(settings_path)?;
+    // Save settings (replace mode - no merging)
+    settings.to_file(settings_path)?;
 
     println!(
         "{} Applied template '{}' successfully!",
@@ -294,7 +296,7 @@ fn apply_snapshot_command(
         snapshot.settings.model = Some(model_name.clone());
     }
 
-    // Load existing settings and merge
+    // Load existing settings for comparison (will be replaced, not merged)
     let existing_settings = ClaudeSettings::from_file(settings_path)?;
 
     // Backup current settings if requested
@@ -317,10 +319,8 @@ fn apply_snapshot_command(
         }
     }
 
-    let final_settings = snapshot.settings.merge_with(existing_settings);
-
-    // Save settings
-    final_settings.to_file(settings_path)?;
+    // Save settings (replace mode - no merging)
+    snapshot.settings.to_file(settings_path)?;
 
     println!(
         "{} Applied snapshot '{}' successfully!",

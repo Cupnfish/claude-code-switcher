@@ -205,12 +205,8 @@ impl ClaudeSettings {
                 }
             }
             TemplateType::KatCoder => {
-                // For unified Kimi template, try all possible environment variables
-                if let Ok(value) = std::env::var("MOONSHOT_API_KEY") {
-                    env.insert("MOONSHOT_API_KEY".to_string(), value);
-                }
                 if let Ok(value) = std::env::var("KIMI_API_KEY") {
-                    env.insert("KIMI_API_KEY".to_string(), value);
+                    env.insert("WQ_API_KEY".to_string(), value);
                 }
             }
             TemplateType::Kimi => {
@@ -356,17 +352,22 @@ pub fn merge_settings(settings: Vec<ClaudeSettings>) -> ClaudeSettings {
 }
 
 /// Helper function to merge hashmaps
+/// base_map has higher priority and overrides other_map for conflicting keys
 fn merge_hashmaps<K: Clone + Eq + std::hash::Hash, V: Clone>(
-    base: Option<HashMap<K, V>>,
-    override_settings: Option<HashMap<K, V>>,
+    base_map: Option<HashMap<K, V>>,
+    other_map: Option<HashMap<K, V>>,
 ) -> Option<HashMap<K, V>> {
-    match (base, override_settings) {
-        (Some(mut base_map), Some(override_map)) => {
-            base_map.extend(override_map);
-            Some(base_map)
+    match (base_map, other_map) {
+        (Some(base), Some(other)) => {
+            let mut result = other;
+            // base_map overrides other_map for conflicting keys
+            for (key, value) in base {
+                result.insert(key, value);
+            }
+            Some(result)
         }
         (Some(base_map), None) => Some(base_map),
-        (None, Some(override_map)) => Some(override_map),
+        (None, Some(other_map)) => Some(other_map),
         (None, None) => None,
     }
 }

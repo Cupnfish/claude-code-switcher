@@ -179,7 +179,10 @@ impl Template for ZaiTemplate {
             });
         }
 
-        if matches!(scope, SnapshotScope::Env | SnapshotScope::All) {
+        if matches!(
+            scope,
+            SnapshotScope::Env | SnapshotScope::Common | SnapshotScope::All
+        ) {
             let mut env = HashMap::new();
             env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.to_string());
             env.insert(

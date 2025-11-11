@@ -192,7 +192,10 @@ impl Template for KimiTemplate {
             });
         }
 
-        if matches!(scope, SnapshotScope::Env | SnapshotScope::All) {
+        if matches!(
+            scope,
+            SnapshotScope::Env | SnapshotScope::Common | SnapshotScope::All
+        ) {
             let mut env = HashMap::new();
 
             // Different authentication for different services
