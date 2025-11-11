@@ -5,15 +5,7 @@ use crate::snapshots::SnapshotScope;
 
 /// Main CLI parser
 #[derive(Parser)]
-#[command(name = "claude-switcher")]
-#[command(about = "Manage Claude Code settings snapshots with ease")]
-#[command(
-    long_about = "A CLI tool for creating, managing, and switching between Claude Code settings snapshots.
-
-Perfect for developers who work with multiple AI models or need to switch between different Claude Code configurations."
-)]
-#[command(version = env!("CARGO_PKG_VERSION"))]
-#[command(author = "Cupnfish")]
+#[command(about, version, author, long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
