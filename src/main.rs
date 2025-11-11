@@ -2134,7 +2134,9 @@ fn credentials_list_command() -> Result<()> {
         Err(e) => {
             // Check if this is a decryption error
             let error_msg = e.to_string();
-            if error_msg.contains("Failed to decrypt credentials") || error_msg.contains("Decryption failed") {
+            if error_msg.contains("Failed to decrypt credentials")
+                || error_msg.contains("Decryption failed")
+            {
                 println!("\n❌ Error reading saved credentials");
                 println!("{}", "─".repeat(60));
                 println!("🔐 The credential file appears to be corrupted or was");
@@ -2277,12 +2279,9 @@ fn credentials_clear_command(yes: bool) -> Result<()> {
         println!("\nThis will permanently delete ALL saved credentials.\n");
 
         let options = vec!["⚠️  Yes, clear all credentials", "❌ No, keep them"];
-        let choice = Select::new(
-            "Are you sure you want to clear all credentials?",
-            options,
-        )
-        .prompt()
-        .map_err(|e| anyhow!("Failed to get user input: {}", e))?;
+        let choice = Select::new("Are you sure you want to clear all credentials?", options)
+            .prompt()
+            .map_err(|e| anyhow!("Failed to get user input: {}", e))?;
 
         if choice == "❌ No, keep them" {
             println!("❌ Operation cancelled.");
@@ -2291,8 +2290,7 @@ fn credentials_clear_command(yes: bool) -> Result<()> {
     }
 
     // Clear the file by overwriting with empty content
-    fs::write(&path, "")
-        .map_err(|e| anyhow!("Failed to clear credentials file: {}", e))?;
+    fs::write(&path, "").map_err(|e| anyhow!("Failed to clear credentials file: {}", e))?;
 
     println!("✅ All credentials cleared successfully");
     println!();
