@@ -76,6 +76,9 @@ ccs apply kat           # 指向 Pro 版本
 
 # Longcat
 ccs apply longcat
+
+# Seed Code（Volcengine）
+ccs apply seed-code
 ```
 
 **关于凭证存储**：当使用模板时，如果环境变量未设置，工具会提示你输入 API 密钥。你可以选择将凭证保存到加密的本地存储中，下次使用时会自动提示你是否使用已保存的凭证。
@@ -147,6 +150,9 @@ export LONGCAT_API_KEY="your_api_key_here"
 # 万擎 KAT-Coder
 export KAT_CODER_API_KEY="your_api_key_here"
 export WANQING_ENDPOINT_ID="your_endpoint_id_here"  # 格式: ep-xxx-xxx
+
+# Seed Code（Volcengine）
+export ARK_API_KEY="your_api_key_here"
 ```
 
 > 💡 **提示**：如果没有设置环境变量，工具会交互式地提示你输入 API 密钥。
@@ -164,6 +170,7 @@ export WANQING_ENDPOINT_ID="your_endpoint_id_here"  # 格式: ep-xxx-xxx
 | 🔧 **KAT-Coder Pro** | `kat-coder-pro` | `katpro` | 专业编程AI，高级功能 | ⭐⭐⭐⭐ |
 | 💨 **KAT-Coder Air** | `kat-coder-air` | `katair` | 轻量级，快速响应 | ⭐⭐⭐ |
 | 🐱 **Longcat** | `longcat` | - | 快速高效对话AI | ⭐⭐⭐ |
+| 🌱 **Seed Code** | `seed-code` | `seedcode` | Volcengine 编程助手 | ⭐⭐⭐ |
 
 ### 🌟 智谱 GLM（强烈推荐）
 
@@ -300,11 +307,11 @@ src/templates/
 ├── mod.rs              # 主模块和 trait 定义
 ├── deepseek.rs         # DeepSeek 模板实现
 ├── zai.rs             # 智谱 GLM 模板实现
-├── k2.rs              # K2 和 K2Thinking 实现
+├── kimi.rs            # Kimi 统一模板（K2, K2Thinking, Kimi For Coding）
 ├── kat_coder.rs       # KatCoder Pro 和 Air 实现
-├── kimi.rs            # Kimi 模板实现
 ├── longcat.rs         # Longcat 模板实现
-└── minimax.rs         # MiniMax 模板实现
+├── minimax.rs         # MiniMax 模板实现
+└── seed_code.rs       # Seed Code 模板实现
 ```
 
 #### 🎯 Trait-based 设计
