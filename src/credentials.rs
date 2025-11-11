@@ -118,6 +118,23 @@ impl CredentialData {
         self.metadata = Some(metadata);
         self.update_timestamp();
     }
+
+    /// Get a specific metadata value
+    pub fn get_metadata(&self, key: &str) -> Option<String> {
+        self.metadata.as_ref()?.get(key).cloned()
+    }
+
+    /// Set a specific metadata value
+    pub fn set_metadata_value(&mut self, key: String, value: String) {
+        if let Some(ref mut metadata) = self.metadata {
+            metadata.insert(key, value);
+        } else {
+            let mut new_metadata = std::collections::HashMap::new();
+            new_metadata.insert(key, value);
+            self.metadata = Some(new_metadata);
+        }
+        self.update_timestamp();
+    }
 }
 
 /// Result type for credential operations
@@ -297,6 +314,54 @@ impl CredentialStore {
         Ok(credential.api_key().to_string())
     }
 
+    /// Check if API key already exists for this template type
+    pub fn has_api_key(&self, api_key: &str, template_type: &TemplateType) -> bool {
+        if let Ok(credentials) = self.store.find_by_template_type(template_type) {
+            for credential in credentials {
+                if credential.api_key() == api_key {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Get saved endpoint IDs for a template type (from credential metadata)
+    pub fn get_endpoint_ids(&self, template_type: &TemplateType) -> Vec<(String, String)> {
+        let mut endpoint_ids = Vec::new();
+        if let Ok(credentials) = self.store.find_by_template_type(template_type) {
+            for credential in credentials {
+                if let Some(endpoint_id) = credential.get_metadata("endpoint_id") {
+                    let name = format!("{} - {}", credential.name(), endpoint_id);
+                    endpoint_ids.push((name, endpoint_id));
+                }
+            }
+        }
+        endpoint_ids
+    }
+
+    /// Save endpoint ID to credential metadata
+    pub fn save_endpoint_id(&self, credential_id: &str, endpoint_id: &str) -> Result<()> {
+        let mut credential = self.store.load(credential_id)?;
+        credential.set_metadata_value("endpoint_id".to_string(), endpoint_id.to_string());
+        self.store.save(&credential)?;
+        Ok(())
+    }
+
+    /// Check if endpoint ID exists
+    pub fn has_endpoint_id(&self, endpoint_id: &str, template_type: &TemplateType) -> bool {
+        if let Ok(credentials) = self.store.find_by_template_type(template_type) {
+            for credential in credentials {
+                if let Some(saved_endpoint) = credential.get_metadata("endpoint_id")
+                    && saved_endpoint == endpoint_id
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Update credential name
     pub fn update_name(&self, credential_id: &str, new_name: String) -> Result<()> {
         let mut credential = self.store.load(credential_id)?;
@@ -341,7 +406,7 @@ impl crate::CredentialManager for CredentialStore {
     fn clear_credentials(&self) -> Result<()> {
         let credentials = self.store.list()?;
         for credential in credentials {
-            self.store.delete(&credential.id())?;
+            self.store.delete(credential.id())?;
         }
         Ok(())
     }
@@ -380,69 +445,65 @@ pub fn prompt_save_credential(
     if let Ok(should_save) = Confirm::new("Would you like to save this API key for future use?")
         .with_default(true)
         .prompt()
+        && should_save
     {
-        if should_save {
-            let name = Text::new("Enter a name for this credential:")
-                .with_placeholder(&format!("{} API Key", template_type))
-                .prompt()
-                .map_err(|e| anyhow!("Failed to get credential name: {}", e))?;
+        let name = Text::new("Enter a name for this credential:")
+            .with_placeholder(&format!("{} API Key", template_type))
+            .prompt()
+            .map_err(|e| anyhow!("Failed to get credential name: {}", e))?;
 
-            let store = CredentialStore::new()?;
-            let credential = store.create_credential(name, api_key, template_type)?;
+        let store = CredentialStore::new()?;
+        let credential = store.create_credential(name, api_key, template_type)?;
 
-            println!("✓ Credential saved successfully!");
-            return Ok(Some(credential));
-        }
+        println!("✓ Credential saved successfully!");
+        return Ok(Some(credential));
     }
     Ok(None)
 }
 
-/// Get API key interactively with option to save
+/// Get API key interactively using simple selector
 pub fn get_api_key_interactively(template_type: TemplateType) -> Result<String> {
-    // Try to use saved credentials first
-    if let Ok(credential_store) = CredentialStore::new() {
-        if let Ok(credentials) = credential_store.store.find_by_template_type(&template_type) {
-            if !credentials.is_empty() {
-                println!("Found saved credentials for {}:", template_type);
+    // First, try to get API key from environment variables
+    let env_var_name = crate::templates::get_env_var_name(&template_type);
+    if let Ok(api_key) = std::env::var(env_var_name)
+        && !api_key.trim().is_empty()
+    {
+        println!("✓ Using API key from environment variable {}", env_var_name);
+        return Ok(api_key);
+    }
 
-                for credential in &credentials {
-                    println!(
-                        "  • {}: {} ({})",
-                        STYLE_CYAN.apply_to(credential.name()),
-                        mask_api_key(credential.api_key()),
-                        credential.created_at()
-                    );
-                }
+    // Get saved credentials
+    let credentials = if let Ok(credential_store) = CredentialStore::new() {
+        credential_store
+            .store
+            .find_by_template_type(&template_type)
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
 
-                if let Ok(continue_use) = Confirm::new("Use one of these saved credentials?")
-                    .with_default(true)
-                    .prompt()
+    // Use simple selector
+    let mut selector =
+        crate::simple_selector::SimpleCredentialSelector::new(credentials, template_type.clone());
+
+    match selector.run()? {
+        Some(api_key) => {
+            // Auto-save the credential if it's new
+            if let Ok(credential_store) = CredentialStore::new()
+                && !credential_store.has_api_key(&api_key, &template_type)
+            {
+                let default_name = format!("{} API Key", template_type);
+                if credential_store
+                    .create_credential(default_name, &api_key, template_type)
+                    .is_ok()
                 {
-                    if continue_use {
-                        if let Ok(selected) =
-                            select_credential(&credentials, "Select a credential:")
-                        {
-                            return credential_store.get_api_key(&selected);
-                        }
-                    }
+                    println!("✓ API key saved automatically for future use.");
                 }
             }
+            Ok(api_key)
         }
+        None => Err(anyhow!("No API key selected")),
     }
-
-    // If no saved credentials or user chooses not to use them, prompt for API key
-    let prompt_text = format!("Enter your {} API key:", template_type);
-    let api_key = Text::new(&prompt_text)
-        .with_placeholder("sk-...")
-        .prompt()
-        .map_err(|e| anyhow!("Failed to get API key: {}", e))?;
-
-    // Offer to save the credential
-    if let Some(_) = prompt_save_credential(&api_key, template_type)? {
-        // Credential was saved
-    }
-
-    Ok(api_key)
 }
 
 /// Mask API key for display (show first 4 and last 4 characters)
@@ -458,9 +519,6 @@ fn mask_api_key(api_key: &str) -> String {
         )
     }
 }
-
-use console::Style;
-const STYLE_CYAN: Style = Style::new().cyan();
 
 #[cfg(test)]
 mod tests {

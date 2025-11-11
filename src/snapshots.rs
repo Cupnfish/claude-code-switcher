@@ -7,11 +7,12 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 /// Scope for snapshots
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum SnapshotScope {
     /// Only environment variables
     Env,
     /// Common settings (exclude environment)
+    #[default]
     Common,
     /// All settings
     All,
@@ -255,25 +256,20 @@ impl SnapshotStore {
 pub fn filter_settings_by_scope(settings: ClaudeSettings, scope: &SnapshotScope) -> ClaudeSettings {
     match scope {
         SnapshotScope::Env => ClaudeSettings {
-            environment: settings.environment,
+            env: settings.env,
             ..Default::default()
         },
         SnapshotScope::Common => ClaudeSettings {
-            provider: settings.provider,
+            env: settings.env,
             model: settings.model,
-            endpoint: settings.endpoint,
-            http: settings.http,
+            output_style: settings.output_style,
+            include_co_authored_by: settings.include_co_authored_by,
             permissions: settings.permissions,
             hooks: settings.hooks,
             status_line: settings.status_line,
-            environment: None,
+            subagent_model: settings.subagent_model,
+            ..Default::default()
         },
         SnapshotScope::All => settings,
-    }
-}
-
-impl Default for SnapshotScope {
-    fn default() -> Self {
-        Self::Common
     }
 }

@@ -26,6 +26,11 @@ pub trait Template {
     /// Get description for the template
     fn description(&self) -> &'static str;
 
+    /// Get API key acquisition URL (if available)
+    fn api_key_url(&self) -> Option<&'static str> {
+        None
+    }
+
     /// Check if this template requires additional configuration (like endpoint ID)
     fn requires_additional_config(&self) -> bool {
         false
@@ -35,21 +40,67 @@ pub trait Template {
     fn get_additional_config(&self) -> Result<HashMap<String, String>> {
         Ok(HashMap::new())
     }
+
+    /// Check if this template has sub-variants (like Pro/Air versions)
+    fn has_variants(&self) -> bool {
+        false
+    }
+
+    /// Get available variants if this template supports them
+    fn get_variants() -> Result<Vec<Self>>
+    where
+        Self: Sized,
+    {
+        Ok(Vec::new())
+    }
+
+    /// Create a template instance interactively (for templates with variants)
+    fn create_interactively() -> Result<Self>
+    where
+        Self: Sized,
+    {
+        Err(anyhow!(
+            "This template does not support interactive creation"
+        ))
+    }
 }
 
 /// Type of AI provider template
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub enum TemplateType {
     DeepSeek,
     Zai,
-    K2,
-    K2Thinking,
     KatCoder,
-    KatCoderPro,
-    KatCoderAir,
-    Kimi,
+    Kimi, // Unified Moonshot services (K2, K2 Thinking, Kimi For Coding)
     Longcat,
     MiniMax,
+    SeedCode,
+}
+
+impl<'de> Deserialize<'de> for TemplateType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+
+        // Handle backward compatibility for old variant names
+        match s.as_str() {
+            "KatCoderPro" | "KatCoderAir" => Ok(TemplateType::KatCoder),
+            "DeepSeek" => Ok(TemplateType::DeepSeek),
+            "Zai" => Ok(TemplateType::Zai),
+            "K2" | "K2Thinking" => Ok(TemplateType::Kimi), // Backward compatibility
+            "KatCoder" => Ok(TemplateType::KatCoder),
+            "Kimi" => Ok(TemplateType::Kimi),
+            "Longcat" => Ok(TemplateType::Longcat),
+            "MiniMax" => Ok(TemplateType::MiniMax),
+            "SeedCode" => Ok(TemplateType::SeedCode),
+            _ => Err(serde::de::Error::custom(format!(
+                "unknown template type: {}",
+                s
+            ))),
+        }
+    }
 }
 
 impl std::str::FromStr for TemplateType {
@@ -58,17 +109,21 @@ impl std::str::FromStr for TemplateType {
     fn from_str(s: &str) -> Result<Self> {
         match s.to_lowercase().as_str() {
             "deepseek" | "ds" => Ok(TemplateType::DeepSeek),
-            "glm" | "zhipu" | "zai" => Ok(TemplateType::Zai),
-            "k2" | "moonshot" => Ok(TemplateType::K2),
-            "k2-thinking" | "k2thinking" => Ok(TemplateType::K2Thinking),
-            "kat-coder" | "katcoder" | "kat" => Ok(TemplateType::KatCoderPro), // Legacy alias: points to Pro version
-            "kat-coder-pro" | "katcoder-pro" | "katpro" => Ok(TemplateType::KatCoderPro),
-            "kat-coder-air" | "katcoder-air" | "katair" => Ok(TemplateType::KatCoderAir),
-            "kimi" | "kimi-for-coding" => Ok(TemplateType::Kimi),
+            "glm" | "zhipu" | "zai" | "zai-china" | "zai-ch" | "zai-international" | "zai-int" => {
+                Ok(TemplateType::Zai)
+            }
+            // K2 and K2 Thinking are now part of unified Kimi template
+            "k2" | "moonshot" | "k2-thinking" | "k2thinking" | "kimi" | "kimi-for-coding" => {
+                Ok(TemplateType::Kimi)
+            }
+            "kat-coder" | "katcoder" | "kat" => Ok(TemplateType::KatCoder), // Unified KatCoder
+            "kat-coder-pro" | "katcoder-pro" | "katpro" => Ok(TemplateType::KatCoder), // Points to KatCoder with variant selection
+            "kat-coder-air" | "katcoder-air" | "katair" => Ok(TemplateType::KatCoder), // Points to KatCoder with variant selection
             "longcat" => Ok(TemplateType::Longcat),
             "minimax" | "minimax-anthropic" => Ok(TemplateType::MiniMax),
+            "seed-code" | "seedcode" | "seed_code" => Ok(TemplateType::SeedCode),
             _ => Err(anyhow!(
-                "Unknown template: {}. Available templates: deepseek, glm, k2, k2-thinking, kat-coder, kat-coder-pro, kat-coder-air, kimi, longcat, minimax",
+                "Unknown template: {}. Available templates: deepseek, glm, k2, k2-thinking, kat-coder, kimi, longcat, minimax, seed-code",
                 s
             )),
         }
@@ -80,14 +135,11 @@ impl std::fmt::Display for TemplateType {
         match self {
             TemplateType::DeepSeek => write!(f, "deepseek"),
             TemplateType::Zai => write!(f, "zai"),
-            TemplateType::K2 => write!(f, "k2"),
-            TemplateType::K2Thinking => write!(f, "k2-thinking"),
             TemplateType::KatCoder => write!(f, "kat-coder"),
-            TemplateType::KatCoderPro => write!(f, "kat-coder-pro"),
-            TemplateType::KatCoderAir => write!(f, "kat-coder-air"),
-            TemplateType::Kimi => write!(f, "kimi"),
+            TemplateType::Kimi => write!(f, "kimi"), // Unified Moonshot services
             TemplateType::Longcat => write!(f, "longcat"),
             TemplateType::MiniMax => write!(f, "minimax"),
+            TemplateType::SeedCode => write!(f, "seed-code"),
         }
     }
 }
@@ -102,46 +154,74 @@ pub fn get_all_templates() -> Vec<TemplateType> {
     vec![
         TemplateType::DeepSeek,
         TemplateType::Zai,
-        TemplateType::K2,
-        TemplateType::K2Thinking,
         TemplateType::KatCoder,
-        TemplateType::KatCoderPro,
-        TemplateType::KatCoderAir,
-        TemplateType::Kimi,
+        TemplateType::Kimi, // Unified Moonshot services
         TemplateType::Longcat,
         TemplateType::MiniMax,
+        TemplateType::SeedCode,
     ]
 }
 
 /// Get the environment variable name for a template type
+/// Note: For Kimi template, this returns a default. The actual template instance
+/// will determine the correct env var based on the specific variant.
 pub fn get_env_var_name(template_type: &TemplateType) -> &'static str {
     match template_type {
         TemplateType::DeepSeek => "DEEPSEEK_API_KEY",
         TemplateType::Zai => "Z_AI_API_KEY",
-        TemplateType::K2 | TemplateType::K2Thinking => "MOONSHOT_API_KEY",
-        TemplateType::KatCoder | TemplateType::KatCoderPro | TemplateType::KatCoderAir => {
-            "KAT_CODER_API_KEY"
-        }
-        TemplateType::Kimi => "KIMI_API_KEY",
+        TemplateType::KatCoder => "KAT_CODER_API_KEY",
+        TemplateType::Kimi => "MOONSHOT_API_KEY", // Default for K2 variants
         TemplateType::Longcat => "LONGCAT_API_KEY",
         TemplateType::MiniMax => "MINIMAX_API_KEY",
+        TemplateType::SeedCode => "ARK_API_KEY",
     }
 }
 
-/// Get a template instance by type
-pub fn get_template_instance(template_type: &TemplateType) -> Box<dyn Template> {
+/// Get a template instance by type and original input string
+pub fn get_template_instance_with_input(
+    template_type: &TemplateType,
+    input: &str,
+) -> Box<dyn Template> {
     match template_type {
         TemplateType::DeepSeek => Box::new(deepseek::DeepSeekTemplate),
-        TemplateType::Zai => Box::new(zai::ZaiTemplate),
-        TemplateType::K2 => Box::new(k2::K2Template),
-        TemplateType::K2Thinking => Box::new(k2::K2ThinkingTemplate),
-        TemplateType::KatCoder => Box::new(kat_coder::KatCoderProTemplate), // Legacy alias
-        TemplateType::KatCoderPro => Box::new(kat_coder::KatCoderProTemplate),
-        TemplateType::KatCoderAir => Box::new(kat_coder::KatCoderAirTemplate),
-        TemplateType::Kimi => Box::new(kimi::KimiTemplate),
+        TemplateType::Zai => {
+            // Check if specific region was requested
+            match input.to_lowercase().as_str() {
+                "zai-china" | "zai-ch" => Box::new(zai::ZaiTemplate::china()),
+                "zai-international" | "zai-int" => Box::new(zai::ZaiTemplate::international()),
+                _ => Box::new(zai::ZaiTemplate::china()), // Default to China for general "zai"
+            }
+        }
+        TemplateType::KatCoder => {
+            // Check if specific variant was requested
+            match input.to_lowercase().as_str() {
+                "kat-coder-pro" | "katcoder-pro" | "katpro" => {
+                    Box::new(kat_coder::KatCoderTemplate::pro())
+                }
+                "kat-coder-air" | "katcoder-air" | "katair" => {
+                    Box::new(kat_coder::KatCoderTemplate::air())
+                }
+                _ => Box::new(kat_coder::KatCoderTemplate::pro()), // Default to Pro for general "kat-coder"
+            }
+        }
+        TemplateType::Kimi => {
+            // Check if specific Moonshot service was requested
+            match input.to_lowercase().as_str() {
+                "k2" | "moonshot" => Box::new(kimi::KimiTemplate::k2()),
+                "k2-thinking" | "k2thinking" => Box::new(kimi::KimiTemplate::k2_thinking()),
+                "kimi" | "kimi-for-coding" => Box::new(kimi::KimiTemplate::kimi_for_coding()),
+                _ => Box::new(kimi::KimiTemplate::k2()), // Default to K2 for general "kimi"
+            }
+        }
         TemplateType::Longcat => Box::new(longcat::LongcatTemplate),
         TemplateType::MiniMax => Box::new(minimax::MiniMaxTemplate),
+        TemplateType::SeedCode => Box::new(seed_code::SeedCodeTemplate),
     }
+}
+
+/// Get a template instance by type (for backward compatibility)
+pub fn get_template_instance(template_type: &TemplateType) -> Box<dyn Template> {
+    get_template_instance_with_input(template_type, "")
 }
 
 /// Legacy compatibility function - creates a settings function for backwards compatibility
@@ -149,31 +229,28 @@ pub fn get_template(template_type: &TemplateType) -> fn(&str, &SnapshotScope) ->
     match template_type {
         TemplateType::DeepSeek => create_deepseek_template,
         TemplateType::Zai => create_zai_template,
-        TemplateType::K2 => create_k2_template,
-        TemplateType::K2Thinking => create_k2_thinking_template,
-        TemplateType::KatCoder => create_kat_coder_pro_template, // Legacy alias: points to Pro version
-        TemplateType::KatCoderPro => create_kat_coder_pro_template,
-        TemplateType::KatCoderAir => create_kat_coder_air_template,
-        TemplateType::Kimi => create_kimi_template,
+        TemplateType::KatCoder => create_kat_coder_template,
+        TemplateType::Kimi => create_k2_template, // Default to K2 for backward compatibility
         TemplateType::Longcat => create_longcat_template,
         TemplateType::MiniMax => create_minimax_template,
+        TemplateType::SeedCode => create_seed_code_template,
     }
 }
 
 // Import all template modules
 pub mod deepseek;
-pub mod k2;
 pub mod kat_coder;
-pub mod kimi;
+pub mod kimi; // Unified module for all Moonshot services
 pub mod longcat;
 pub mod minimax;
+pub mod seed_code;
 pub mod zai;
 
 // Re-export for backward compatibility
 pub use deepseek::*;
-pub use k2::*;
 pub use kat_coder::*;
-pub use kimi::*;
+pub use kimi::*; // Includes legacy k2 functions
 pub use longcat::*;
 pub use minimax::*;
+pub use seed_code::*;
 pub use zai::*;

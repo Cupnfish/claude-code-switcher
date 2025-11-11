@@ -1,9 +1,7 @@
 //! Longcat AI provider template implementation
 
 use crate::{
-    settings::{
-        ClaudeSettings, EndpointConfig, HTTPConfig, ModelConfig, Permissions, ProviderConfig,
-    },
+    settings::{ClaudeSettings, Permissions},
     snapshots::SnapshotScope,
     templates::Template,
 };
@@ -34,34 +32,24 @@ impl Template for LongcatTemplate {
         let mut settings = ClaudeSettings::new();
 
         if matches!(scope, SnapshotScope::Common | SnapshotScope::All) {
-            settings.provider = Some(ProviderConfig {
-                id: "longcat".to_string(),
-                metadata: None,
-            });
-
-            settings.model = Some(ModelConfig {
-                name: "LongCat-Flash-Chat".to_string(),
-                metadata: None,
-            });
-
-            settings.endpoint = Some(EndpointConfig {
-                id: "longcat".to_string(),
-                api_base: "https://api.longcat.chat/anthropic".to_string(),
-                api_key: None,
-                endpoint_id: None,
-                metadata: None,
-            });
-
-            settings.http = Some(HTTPConfig {
-                timeout_ms: Some(30000),
-                max_retries: Some(3),
-                retry_backoff_factor: Some(2.0),
-            });
+            settings.model = Some("LongCat-Flash-Chat".to_string());
 
             settings.permissions = Some(Permissions {
-                allow_network_access: Some(true),
-                allow_filesystem_access: Some(true),
-                allow_command_execution: Some(false),
+                allow: Some(vec![
+                    "Bash".to_string(),
+                    "Read".to_string(),
+                    "Write".to_string(),
+                    "Edit".to_string(),
+                    "MultiEdit".to_string(),
+                    "Glob".to_string(),
+                    "Grep".to_string(),
+                    "WebFetch".to_string(),
+                ]),
+                ask: None,
+                deny: Some(vec!["WebSearch".to_string()]),
+                additional_directories: None,
+                default_mode: None,
+                disable_bypass_permissions_mode: None,
             });
         }
 
@@ -92,7 +80,7 @@ impl Template for LongcatTemplate {
                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),
                 "1".to_string(),
             );
-            settings.environment = Some(env);
+            settings.env = Some(env);
         }
 
         settings

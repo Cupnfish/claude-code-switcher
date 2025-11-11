@@ -1,4 +1,4 @@
-//! DeepSeek AI provider template implementation
+//! Seed Code (Volcengine) AI provider template implementation
 
 use crate::{
     settings::{ClaudeSettings, Permissions},
@@ -7,36 +7,36 @@ use crate::{
 };
 use std::collections::HashMap;
 
-/// DeepSeek AI provider template
+/// Seed Code AI provider template
 #[derive(Debug, Clone)]
-pub struct DeepSeekTemplate;
+pub struct SeedCodeTemplate;
 
-impl Template for DeepSeekTemplate {
+impl Template for SeedCodeTemplate {
     fn template_type(&self) -> crate::templates::TemplateType {
-        crate::templates::TemplateType::DeepSeek
+        crate::templates::TemplateType::SeedCode
     }
 
     fn env_var_name(&self) -> &'static str {
-        "DEEPSEEK_API_KEY"
+        "ARK_API_KEY"
     }
 
     fn display_name(&self) -> &'static str {
-        "DeepSeek"
+        "Seed Code"
     }
 
     fn description(&self) -> &'static str {
-        "DeepSeek Chat API - High-performance conversational AI"
+        "Volcengine Seed Code - AI coding assistant"
     }
 
     fn api_key_url(&self) -> Option<&'static str> {
-        Some("https://platform.deepseek.com/api_keys")
+        Some("https://console.volcengine.com/ark/region:ark+cn-beijing/apikey")
     }
 
     fn create_settings(&self, api_key: &str, scope: &SnapshotScope) -> ClaudeSettings {
         let mut settings = ClaudeSettings::new();
 
         if matches!(scope, SnapshotScope::Common | SnapshotScope::All) {
-            settings.model = Some("deepseek-chat".to_string());
+            settings.model = Some("doubao-seed-code-preview-latest".to_string());
 
             settings.permissions = Some(Permissions {
                 allow: Some(vec![
@@ -59,17 +59,21 @@ impl Template for DeepSeekTemplate {
 
         if matches!(scope, SnapshotScope::Env | SnapshotScope::All) {
             let mut env = HashMap::new();
+            env.insert("ANTHROPIC_API_KEY".to_string(), api_key.to_string());
+            env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.to_string());
             env.insert(
                 "ANTHROPIC_BASE_URL".to_string(),
-                "https://api.deepseek.com/anthropic".to_string(),
+                "https://ark.cn-beijing.volces.com/api/coding".to_string(),
             );
-            env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.to_string());
-            env.insert("API_TIMEOUT_MS".to_string(), "600000".to_string());
-            env.insert("ANTHROPIC_MODEL".to_string(), "deepseek-chat".to_string());
+            env.insert(
+                "ANTHROPIC_MODEL".to_string(),
+                "doubao-seed-code-preview-latest".to_string(),
+            );
             env.insert(
                 "ANTHROPIC_SMALL_FAST_MODEL".to_string(),
-                "deepseek-chat".to_string(),
+                "doubao-seed-code-preview-latest".to_string(),
             );
+            env.insert("API_TIMEOUT_MS".to_string(), "3000000".to_string());
             env.insert(
                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),
                 "1".to_string(),
@@ -81,8 +85,8 @@ impl Template for DeepSeekTemplate {
     }
 }
 
-/// Create DeepSeek template settings (legacy compatibility function)
-pub fn create_deepseek_template(api_key: &str, scope: &SnapshotScope) -> ClaudeSettings {
-    let template = DeepSeekTemplate;
+/// Create Seed Code template settings (legacy compatibility function)
+pub fn create_seed_code_template(api_key: &str, scope: &SnapshotScope) -> ClaudeSettings {
+    let template = SeedCodeTemplate;
     template.create_settings(api_key, scope)
 }

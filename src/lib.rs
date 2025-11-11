@@ -5,8 +5,10 @@
 
 pub mod cli;
 pub mod commands;
+pub mod confirm_selector;
 pub mod credentials;
 pub mod settings;
+pub mod simple_selector;
 pub mod snapshots;
 pub mod templates;
 pub mod utils;

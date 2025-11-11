@@ -1,9 +1,9 @@
 use crate::{
     Configurable, CredentialManager,
     credentials::{CredentialStore, get_api_key_interactively},
-    settings::{ClaudeSettings, format_settings_for_display},
+    settings::{ClaudeSettings, format_settings_comparison, format_settings_for_display},
     snapshots::{SnapshotScope, SnapshotStore},
-    templates::{TemplateType, get_template, get_template_type},
+    templates::{Template, TemplateType, get_template_instance_with_input, get_template_type},
     utils::{
         backup_settings, confirm_action, get_credentials_dir, get_settings_path, get_snapshots_dir,
     },
@@ -101,19 +101,20 @@ pub fn snap_command(
     let mut snapshot_settings = settings;
 
     if matches!(scope, SnapshotScope::All | SnapshotScope::Env) {
-        snapshot_settings.environment = Some(ClaudeSettings::capture_environment());
+        snapshot_settings.env = Some(ClaudeSettings::capture_environment());
     }
 
     let snapshots_dir = crate::utils::get_snapshots_dir();
     let store = SnapshotStore::new(snapshots_dir);
 
-    if store.exists_by_name(name) && !overwrite {
-        if !confirm_action(
+    if store.exists_by_name(name)
+        && !overwrite
+        && !confirm_action(
             &format!("Snapshot '{}' already exists. Overwrite?", name),
             false,
-        )? {
-            return Ok(());
-        }
+        )?
+    {
+        return Ok(());
     }
 
     let snapshot = crate::Snapshot::new(
@@ -146,7 +147,15 @@ pub fn apply_command(
 
     // Try to parse as template type first
     if let Ok(template_type) = get_template_type(target) {
-        return apply_template_command(&template_type, scope, model, &settings_path, backup, yes);
+        return apply_template_command(
+            &template_type,
+            target,
+            scope,
+            model,
+            &settings_path,
+            backup,
+            yes,
+        );
     }
 
     // Otherwise treat as snapshot name
@@ -156,23 +165,62 @@ pub fn apply_command(
 /// Apply a template
 fn apply_template_command(
     template_type: &TemplateType,
+    target: &str,
     scope: &SnapshotScope,
     model: &Option<String>,
     settings_path: &PathBuf,
     backup: bool,
     yes: bool,
 ) -> Result<()> {
-    let template = get_template(template_type);
-    // Get API key
-    let api_key = get_api_key_interactively(template_type.clone())?;
+    // Get template instance with the original input to handle specific variants
+    let initial_template = get_template_instance_with_input(template_type, target);
 
-    let mut settings = template(&api_key, scope);
+    // If template has variants and user didn't specify a specific one, let user choose interactively
+    let template_instance = if initial_template.has_variants()
+        && ((target == "kat-coder" || target == "katcoder" || target == "kat")
+            || (target == "kimi")
+            || (target == "zai" || target == "glm" || target == "zhipu"))
+    {
+        // Use template's interactive creation method
+        match template_type {
+            crate::templates::TemplateType::KatCoder => {
+                let kat_coder_template =
+                    crate::templates::kat_coder::KatCoderTemplate::create_interactively()?;
+                Box::new(kat_coder_template) as Box<dyn Template>
+            }
+            crate::templates::TemplateType::Kimi => {
+                let kimi_template = crate::templates::kimi::KimiTemplate::create_interactively()?;
+                Box::new(kimi_template) as Box<dyn Template>
+            }
+            crate::templates::TemplateType::Zai => {
+                let zai_template = crate::templates::zai::ZaiTemplate::create_interactively()?;
+                Box::new(zai_template) as Box<dyn Template>
+            }
+            _ => initial_template,
+        }
+    } else {
+        initial_template
+    };
+
+    // Get API key - use the template instance's env var name for accuracy
+    let api_key = {
+        let env_var_name = template_instance.env_var_name();
+        if let Ok(api_key) = std::env::var(env_var_name)
+            && !api_key.trim().is_empty()
+        {
+            println!("✓ Using API key from environment variable {}", env_var_name);
+            api_key
+        } else {
+            // Fallback to general API key selection
+            get_api_key_interactively(template_type.clone())?
+        }
+    };
+
+    let mut settings = template_instance.create_settings(&api_key, scope);
 
     // Override model if specified
     if let Some(model_name) = model {
-        if let Some(ref mut model_config) = settings.model {
-            model_config.name = model_name.clone();
-        }
+        settings.model = Some(model_name.clone());
     }
 
     // Load existing settings and merge
@@ -188,12 +236,24 @@ fn apply_template_command(
         let existing_masked = existing_settings.clone().mask_sensitive_data();
         let new_masked = settings.clone().mask_sensitive_data();
 
-        println!("Current settings:");
-        println!("{}", format_settings_for_display(&existing_masked, false));
-        println!("\nNew settings:");
-        println!("{}", format_settings_for_display(&new_masked, false));
+        let comparison = format_settings_comparison(&existing_masked, &new_masked);
 
-        if !confirm_action("Apply these settings?", false)? {
+        if comparison == "Settings are identical." {
+            println!(
+                "{}",
+                style("Settings are already configured as requested.").green()
+            );
+            // Even if settings are identical, we still need to save them in case the user
+            // explicitly wanted to ensure these settings are applied
+            let final_settings = settings.merge_with(existing_settings);
+            final_settings.to_file(settings_path)?;
+            return Ok(());
+        }
+
+        println!("Changes to be applied:");
+        println!("{}", comparison);
+
+        if !confirm_action("Apply these changes?", false)? {
             return Ok(());
         }
     }
@@ -231,9 +291,7 @@ fn apply_snapshot_command(
 
     // Override model if specified
     if let Some(model_name) = model {
-        if let Some(ref mut model_config) = snapshot.settings.model {
-            model_config.name = model_name.clone();
-        }
+        snapshot.settings.model = Some(model_name.clone());
     }
 
     // Load existing settings and merge
@@ -282,10 +340,8 @@ pub fn delete_command(name: &str, yes: bool) -> Result<()> {
         return Err(anyhow!("Snapshot '{}' not found", name));
     }
 
-    if !yes {
-        if !confirm_action(&format!("Delete snapshot '{}'?", name), false)? {
-            return Ok(());
-        }
+    if !yes && !confirm_action(&format!("Delete snapshot '{}'?", name), false)? {
+        return Ok(());
     }
 
     store.delete_by_name(name)?;
@@ -348,10 +404,8 @@ pub fn credentials_delete_command(id: &str) -> Result<()> {
 
 /// Clear all credentials
 pub fn credentials_clear_command(yes: bool) -> Result<()> {
-    if !yes {
-        if !confirm_action("Clear all saved credentials?", false)? {
-            return Ok(());
-        }
+    if !yes && !confirm_action("Clear all saved credentials?", false)? {
+        return Ok(());
     }
 
     let _credentials_dir = get_credentials_dir();

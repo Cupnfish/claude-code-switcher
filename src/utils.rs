@@ -1,6 +1,5 @@
 use anyhow::{Result, anyhow};
 use console::style;
-use inquire::Confirm;
 use std::path::{Path, PathBuf};
 
 use crate::settings::ClaudeSettings;
@@ -8,8 +7,8 @@ use crate::settings::ClaudeSettings;
 /// Get the path to the settings file
 pub fn get_settings_path(settings_path: Option<PathBuf>) -> PathBuf {
     settings_path.unwrap_or_else(|| {
-        let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        home_dir.join(".claude").join("settings.json")
+        // Use current directory by default for project-specific settings
+        PathBuf::from(".claude").join("settings.json")
     })
 }
 
@@ -30,9 +29,9 @@ pub fn get_credentials_dir() -> PathBuf {
     home_dir.join(".claude").join("credentials")
 }
 
-/// Confirm an action with the user
+/// Confirm an action with the user using enhanced selector
 pub fn confirm_action(message: &str, default: bool) -> Result<bool> {
-    Ok(Confirm::new(message).with_default(default).prompt()?)
+    crate::confirm_selector::confirm_with_enhanced_selector(message, default)
 }
 
 /// Create a backup of current settings
@@ -177,33 +176,35 @@ pub fn get_timestamp() -> String {
 pub fn format_settings_summary(settings: &ClaudeSettings) -> String {
     let mut summary = String::new();
 
-    if let Some(ref provider) = settings.provider {
-        summary.push_str(&format!("Provider: {}\n", provider.id));
-    }
-
     if let Some(ref model) = settings.model {
-        summary.push_str(&format!("Model: {}\n", model.name));
-    }
-
-    if let Some(ref endpoint) = settings.endpoint {
-        summary.push_str(&format!(
-            "Endpoint: {} ({})\n",
-            endpoint.id, endpoint.api_base
-        ));
-    }
-
-    if let Some(ref http) = settings.http {
-        if let Some(timeout) = http.timeout_ms {
-            summary.push_str(&format!("Timeout: {}ms\n", timeout));
-        }
+        summary.push_str(&format!("Model: {}\n", model));
     }
 
     if let Some(ref permissions) = settings.permissions {
-        if let Some(network_access) = permissions.allow_network_access {
-            summary.push_str(&format!(
-                "Network Access: {}\n",
-                if network_access { "Allowed" } else { "Denied" }
-            ));
+        if let Some(ref allowed) = permissions.allow
+            && allowed.contains(&"network".to_string())
+        {
+            summary.push_str("Network Access: Allowed\n");
+        }
+        if let Some(ref denied) = permissions.deny
+            && denied.contains(&"network".to_string())
+        {
+            summary.push_str("Network Access: Denied\n");
+        }
+        if let Some(ref allowed) = permissions.allow
+            && allowed.contains(&"filesystem".to_string())
+        {
+            summary.push_str("Filesystem Access: Allowed\n");
+        }
+        if let Some(ref denied) = permissions.deny
+            && denied.contains(&"filesystem".to_string())
+        {
+            summary.push_str("Filesystem Access: Denied\n");
+        }
+        if let Some(ref denied) = permissions.deny
+            && denied.contains(&"command".to_string())
+        {
+            summary.push_str("Command Execution: Denied\n");
         }
     }
 
