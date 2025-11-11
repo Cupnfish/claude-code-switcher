@@ -58,7 +58,13 @@ ccs apply k2sonnet
 # 应用 Longcat 模板
 ccs apply longcat
 
-# 应用 万擎 KAT-Coder 模板
+# 应用 万擎 KAT-Coder Pro 模板
+ccs apply kat-coder-pro
+
+# 应用 万擎 KAT-Coder Air 模板
+ccs apply kat-coder-air
+
+# 向后兼容 - 旧的命令仍然有效（指向 Pro 版本）
 ccs apply kat-coder
 ```
 
@@ -84,7 +90,7 @@ ccs creds clear
 
 保存的凭证使用 AES-256-GCM 加密存储在本地，每个凭证包含：
 - API 密钥（加密存储）
-- Endpoint ID（仅 KatCoder 需要）
+- Endpoint ID（仅 KAT-Coder 需要）
 - 创建时间和最后使用时间
 - 可选的凭证名称
 
@@ -157,16 +163,28 @@ MiniMax 是另一个优秀的选择，支持兼容的 API：
 
 ### 🔧 万擎 KAT-Coder
 
-万擎 KAT-Coder 是一个编程专用模型：
-- 🎯 **专注编程**：针对代码生成和开发任务优化
-- 🔧 **灵活配置**：支持自定义推理点(endpoint)，可根据需求配置
-- 💰 **按需使用**：基于 WanQing 平台，按实际使用量计费
-- ⚡ **易于集成**：遵循标准 Anthropic Claude API 格式
+万擎 KAT-Coder 提供两个不同的模型：
+
+**KAT-Coder Pro (推荐)**
+- 🎯 **高性能**：针对复杂编程任务优化，更强的代码生成能力
+- 💰 **按需计费**：基于实际使用量计费，适合专业开发场景
+- ⚡ **完整功能**：支持所有 Claude Code 功能
+
+**KAT-Coder Air**
+- 🚀 **高性价比**：更经济的选择，适合日常编程任务
+- ⚡ **快速响应**：轻量级模型，响应速度更快
+- 🎯 **核心功能**：支持基础的代码生成和编辑功能
 
 **使用说明**：
 1. 需要设置 `KAT_CODER_API_KEY` 环境变量
 2. 需要设置 `WANQING_ENDPOINT_ID` 环境变量（格式：ep-xxx-xxx）
-3. 使用 `ccs apply kat-coder` 命令应用配置
+3. 每个 endpoint ID 只能对应一个模型，不能混用
+4. 使用以下命令应用不同版本：
+   ```bash
+   ccs apply kat-coder-pro   # 使用 Pro 版本（推荐）
+   ccs apply kat-coder-air   # 使用 Air 版本
+   ccs apply kat-coder       # 向后兼容，等同于 kat-coder-pro
+   ```
 
 ### 其他选择
 

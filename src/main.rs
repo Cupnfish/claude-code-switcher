@@ -70,7 +70,7 @@ enum Commands {
     /// Apply a snapshot or template [alias: a]
     #[command(alias = "a")]
     Apply {
-        /// Snapshot name or template type (deepseek, glm, k2, k2-thinking, kat-coder, kimi, longcat, minimax)
+        /// Snapshot name or template type (deepseek, glm, k2, k2-thinking, kat-coder-pro, kat-coder-air, kat-coder, kimi, longcat, minimax)
         target: String,
 
         /// What to include in the snapshot (default: common)
@@ -334,7 +334,8 @@ enum TemplateType {
     DeepSeek,
     K2,
     K2Thinking,
-    KatCoder,
+    KatCoderPro,
+    KatCoderAir,
     Kimi,
     Longcat,
     Zai,
@@ -373,7 +374,8 @@ impl std::fmt::Display for TemplateType {
             TemplateType::DeepSeek => write!(f, "deepseek"),
             TemplateType::K2 => write!(f, "k2"),
             TemplateType::K2Thinking => write!(f, "k2-thinking"),
-            TemplateType::KatCoder => write!(f, "kat-coder"),
+            TemplateType::KatCoderPro => write!(f, "kat-coder-pro"),
+            TemplateType::KatCoderAir => write!(f, "kat-coder-air"),
             TemplateType::Kimi => write!(f, "kimi"),
             TemplateType::Longcat => write!(f, "longcat"),
             TemplateType::Zai => write!(f, "zai"),
@@ -817,7 +819,9 @@ fn get_template_type(target: &str) -> Option<TemplateType> {
         "glm" | "zhipu" | "zai" => Some(TemplateType::Zai),
         "k2" | "moonshot" => Some(TemplateType::K2),
         "k2-thinking" | "k2thinking" => Some(TemplateType::K2Thinking),
-        "kat-coder" | "katcoder" | "kat" => Some(TemplateType::KatCoder),
+        "kat-coder-pro" | "katcoder-pro" | "katpro" => Some(TemplateType::KatCoderPro),
+        "kat-coder-air" | "katcoder-air" | "katair" => Some(TemplateType::KatCoderAir),
+        "kat-coder" | "katcoder" | "kat" => Some(TemplateType::KatCoderPro), // Legacy alias: points to Pro version
         "kimi" | "kimi-for-coding" => Some(TemplateType::Kimi),
         "longcat" => Some(TemplateType::Longcat),
         "minimax" | "minimax-anthropic" => Some(TemplateType::MiniMax),
@@ -1264,7 +1268,7 @@ fn create_k2_template(api_key: &str) -> ClaudeSettings {
     }
 }
 
-fn create_kat_coder_template(api_key: &str, endpoint_id: &str) -> ClaudeSettings {
+fn create_kat_coder_pro_template(api_key: &str, endpoint_id: &str) -> ClaudeSettings {
     let mut env = std::collections::HashMap::new();
 
     // Construct base URL with endpoint ID
@@ -1281,7 +1285,7 @@ fn create_kat_coder_template(api_key: &str, endpoint_id: &str) -> ClaudeSettings
     );
     env.insert(
         "ANTHROPIC_SMALL_FAST_MODEL".to_string(),
-        "KAT-Coder-Air-V1".to_string(),
+        "KAT-Coder-Pro-V1".to_string(), // Both models use Pro for consistency
     );
     env.insert("API_TIMEOUT_MS".to_string(), "600000".to_string());
     env.insert(
@@ -1329,6 +1333,71 @@ fn create_kat_coder_template(api_key: &str, endpoint_id: &str) -> ClaudeSettings
     }
 }
 
+fn create_kat_coder_air_template(api_key: &str, endpoint_id: &str) -> ClaudeSettings {
+    let mut env = std::collections::HashMap::new();
+
+    // Construct base URL with endpoint ID
+    let base_url = format!(
+        "https://wanqing.streamlakeapi.com/api/gateway/v1/endpoints/{}/claude-code-proxy",
+        endpoint_id
+    );
+
+    env.insert("ANTHROPIC_BASE_URL".to_string(), base_url);
+    env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.to_string());
+    env.insert(
+        "ANTHROPIC_MODEL".to_string(),
+        "KAT-Coder-Air-V1".to_string(),
+    );
+    env.insert(
+        "ANTHROPIC_SMALL_FAST_MODEL".to_string(),
+        "KAT-Coder-Air-V1".to_string(), // Both models use Air for consistency
+    );
+    env.insert("API_TIMEOUT_MS".to_string(), "600000".to_string());
+    env.insert(
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),
+        "1".to_string(),
+    );
+
+    let permissions = Permissions {
+        allow: Some(vec![
+            "Bash".to_string(),
+            "Read".to_string(),
+            "Write".to_string(),
+            "Edit".to_string(),
+            "MultiEdit".to_string(),
+            "Glob".to_string(),
+            "Grep".to_string(),
+            "WebFetch".to_string(),
+        ]),
+        ask: None,
+        deny: Some(vec!["WebSearch".to_string()]),
+        additional_directories: None,
+        default_mode: None,
+        disable_bypass_permissions_mode: None,
+    };
+
+    ClaudeSettings {
+        env: Some(env),
+        model: Some("KAT-Coder-Air-V1".to_string()),
+        output_style: None,
+        include_co_authored_by: Some(true),
+        permissions: Some(permissions),
+        hooks: None,
+        api_key_helper: None,
+        cleanup_period_days: None,
+        disable_all_hooks: None,
+        force_login_method: None,
+        force_login_org_uuid: None,
+        enable_all_project_mcp_servers: None,
+        enabled_mcpjson_servers: None,
+        disabled_mcpjson_servers: None,
+        aws_auth_refresh: None,
+        aws_credential_export: None,
+        status_line: None,
+        subagent_model: None,
+    }
+}
+
 fn get_template_api_key(template: &TemplateType) -> Result<String> {
     // Try to get from environment first
     let env_var = match template {
@@ -1336,7 +1405,8 @@ fn get_template_api_key(template: &TemplateType) -> Result<String> {
         TemplateType::Zai => "Z_AI_API_KEY",
         TemplateType::K2 => "MOONSHOT_API_KEY",
         TemplateType::K2Thinking => "MOONSHOT_API_KEY",
-        TemplateType::KatCoder => "KAT_CODER_API_KEY",
+        TemplateType::KatCoderPro => "KAT_CODER_API_KEY",
+        TemplateType::KatCoderAir => "KAT_CODER_API_KEY",
         TemplateType::Kimi => "KIMI_API_KEY",
         TemplateType::Longcat => "LONGCAT_API_KEY",
         TemplateType::MiniMax => "MINIMAX_API_KEY",
@@ -1407,7 +1477,10 @@ fn get_template_api_key(template: &TemplateType) -> Result<String> {
             }
         });
 
-        let endpoint_id = if *template == TemplateType::KatCoder {
+        let endpoint_id = if matches!(
+            *template,
+            TemplateType::KatCoderPro | TemplateType::KatCoderAir
+        ) {
             match get_kat_coder_endpoint_id() {
                 Ok(id) => Some(id),
                 Err(e) => {
@@ -1506,10 +1579,15 @@ fn apply_template(
         TemplateType::Zai => create_zai_template(&api_key, &ZaiRegion::China),
         TemplateType::K2 => create_k2_template(&api_key),
         TemplateType::K2Thinking => create_k2_thinking_template(&api_key),
-        TemplateType::KatCoder => {
-            // For KatCoder, we need to get the endpoint ID
+        TemplateType::KatCoderPro => {
+            // For KatCoder Pro, we need to get the endpoint ID
             let endpoint_id = get_kat_coder_endpoint_id()?;
-            create_kat_coder_template(&api_key, &endpoint_id)
+            create_kat_coder_pro_template(&api_key, &endpoint_id)
+        }
+        TemplateType::KatCoderAir => {
+            // For KatCoder Air, we need to get the endpoint ID
+            let endpoint_id = get_kat_coder_endpoint_id()?;
+            create_kat_coder_air_template(&api_key, &endpoint_id)
         }
         TemplateType::Kimi => create_kimi_template(&api_key),
         TemplateType::Longcat => create_longcat_template(&api_key, false),
@@ -2418,7 +2496,9 @@ fn list_command(verbose: bool) -> Result<()> {
     println!("  🤖 glm               - GLM/Zhipu AI");
     println!("  🌙 k2                - Moonshot K2 API");
     println!("  🧠 k2-thinking       - Moonshot K2 Thinking API (high-speed, 256K context)");
-    println!("  🔧 kat-coder         - WanQing KAT-Coder (万擎)");
+    println!("  🔧 kat-coder-pro     - WanQing KAT-Coder Pro (万擎 KAT-Coder Pro V1)");
+    println!("  💨 kat-coder-air     - WanQing KAT-Coder Air (万擎 KAT-Coder Air V1)");
+    println!("  🔧 kat-coder         - Legacy alias for kat-coder-pro");
     println!("  🌟 kimi              - Kimi For Coding API");
     println!("  🐱 longcat           - Longcat Chat API");
     println!("  🔥 minimax           - MiniMax API (recommended)");
@@ -2428,7 +2508,9 @@ fn list_command(verbose: bool) -> Result<()> {
     println!("  ccs apply glm --model glm-4-plus     # Apply GLM with custom model");
     println!("  ccs apply k2                          # Apply Moonshot K2 template");
     println!("  ccs apply k2-thinking                  # Apply Moonshot K2 Thinking template");
-    println!("  ccs apply kat-coder                    # Apply WanQing KAT-Coder template");
+    println!("  ccs apply kat-coder-pro               # Apply WanQing KAT-Coder Pro template");
+    println!("  ccs apply kat-coder-air               # Apply WanQing KAT-Coder Air template");
+    println!("  ccs apply kat-coder                   # Apply WanQing KAT-Coder Pro (legacy)");
     println!("  ccs apply kimi                        # Apply Kimi For Coding template");
     println!("  ccs apply minimax                     # Apply MiniMax template");
     println!("  ccs apply my-snapshot --backup       # Apply snapshot with backup");
