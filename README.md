@@ -57,9 +57,34 @@ ccs apply k2sonnet
 
 # 应用 Longcat 模板
 ccs apply longcat
+
+# 应用 万擎 KAT-Coder 模板
+ccs apply kat-coder
 ```
 
-#### 2. 创建自己的快照
+**关于凭证存储**：当使用模板时，如果环境变量未设置，工具会提示你输入 API 密钥。你可以选择将凭证保存到加密的本地存储中，下次使用时会自动提示你是否使用已保存的凭证。
+
+#### 2. 管理保存的凭证
+
+```bash
+# 列出所有保存的凭证
+ccs credentials list
+
+# 删除某个凭证（使用 ID）
+ccs credentials delete <credential-id>
+
+# 或者使用简写
+ccs creds list
+ccs creds delete <credential-id>
+```
+
+保存的凭证使用 AES-256-GCM 加密存储在本地，每个凭证包含：
+- API 密钥（加密存储）
+- Endpoint ID（仅 KatCoder 需要）
+- 创建时间和最后使用时间
+- 可选的凭证名称
+
+#### 3. 创建自己的快照
 
 ```bash
 # 创建当前设置的快照
@@ -69,7 +94,7 @@ ccs snap my-config
 ccs apply my-config
 ```
 
-#### 3. 管理快照
+#### 4. 管理快照
 
 ```bash
 # 查看所有快照
@@ -101,6 +126,10 @@ export K2_SONNET_API_KEY="your_api_key_here"
 
 # Longcat
 export LONGCAT_API_KEY="your_api_key_here"
+
+# 万擎 KAT-Coder
+export KAT_CODER_API_KEY="your_api_key_here"
+export WANQING_ENDPOINT_ID="your_endpoint_id_here"  # 格式: ep-xxx-xxx
 ```
 
 > 💡 **提示**：如果没有设置环境变量，工具会交互式地提示你输入 API 密钥。
@@ -121,6 +150,19 @@ MiniMax 是另一个优秀的选择，支持兼容的 API：
 - 🚀 **性能优秀**：响应速度快，支持流式输出和函数调用
 - 📊 **API 兼容**：支持 Anthropic 和 OpenAI 两种 API 格式
 - 🔧 **功能丰富**：支持工具调用、流式响应等高级功能
+
+### 🔧 万擎 KAT-Coder
+
+万擎 KAT-Coder 是一个编程专用模型：
+- 🎯 **专注编程**：针对代码生成和开发任务优化
+- 🔧 **灵活配置**：支持自定义推理点(endpoint)，可根据需求配置
+- 💰 **按需使用**：基于 WanQing 平台，按实际使用量计费
+- ⚡ **易于集成**：遵循标准 Anthropic Claude API 格式
+
+**使用说明**：
+1. 需要设置 `KAT_CODER_API_KEY` 环境变量
+2. 需要设置 `WANQING_ENDPOINT_ID` 环境变量（格式：ep-xxx-xxx）
+3. 使用 `ccs apply kat-coder` 命令应用配置
 
 ### 其他选择
 
@@ -178,6 +220,11 @@ ccs snap my-config --settings-path /path/to/settings.json
 | `ccs snap <name>` | `ccs s` | 创建快照 |
 | `ccs apply <target>` | `ccs a` | 应用快照或模板 |
 | `ccs delete <name>` | `ccs rm, del` | 删除快照 |
+| `ccs credentials <cmd>` | `ccs creds <cmd>` | 管理保存的凭证 |
+
+凭证管理子命令：
+- `ccs credentials list` - 列出所有保存的凭证
+- `ccs credentials delete <id>` - 删除指定凭证
 
 ## 🛠️ 开发
 

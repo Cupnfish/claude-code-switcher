@@ -7,6 +7,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
+// Encryption dependencies
+use base64::{Engine as _, engine::general_purpose};
+use rand::RngCore;
+use ring::{
+    aead::{self, LessSafeKey, NONCE_LEN, UnboundKey},
+    rand::SecureRandom,
+};
+
 #[derive(Parser)]
 #[command(name = "claude-switcher")]
 #[command(about = "Manage Claude Code settings snapshots with ease")]
@@ -22,8 +30,8 @@ Examples:
     ccs apply minimax       # Apply MiniMax Anthropic template
     ccs ls -v               # List snapshots with details"
 )]
-#[command(version = "0.1.0")]
-#[command(author = "Claude Code Switcher Team")]
+#[command(version = env!("CARGO_PKG_VERSION"))]
+#[command(author = "Cupnfish")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -69,7 +77,7 @@ enum Commands {
     /// Apply a snapshot or template [alias: a]
     #[command(alias = "a")]
     Apply {
-        /// Snapshot name or template type (deepseek, glm, k2, k2-thinking, kimi, longcat, minimax)
+        /// Snapshot name or template type (deepseek, glm, k2, k2-thinking, kat-coder, kimi, longcat, minimax)
         target: String,
 
         /// What to include in the snapshot (default: common)
@@ -103,6 +111,29 @@ enum Commands {
         #[arg(long, help = "Skip confirmation prompt")]
         yes: bool,
     },
+
+    /// Manage saved credentials [alias: creds]
+    #[command(alias = "creds")]
+    Credentials {
+        #[command(subcommand)]
+        command: CredentialCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum CredentialCommands {
+    /// List all saved credentials
+    List,
+
+    /// Delete a saved credential
+    Delete {
+        /// ID of the credential to delete
+        id: String,
+
+        /// Skip confirmation prompt
+        #[arg(long, help = "Skip confirmation prompt")]
+        yes: bool,
+    },
 }
 
 #[derive(Args)]
@@ -124,7 +155,7 @@ struct ApplyArgs {
     yes: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct ClaudeSettings {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub env: Option<std::collections::HashMap<String, String>>,
@@ -239,6 +270,57 @@ struct StatusLine {
     pub command: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SavedCredential {
+    pub id: String,
+    pub template_type: TemplateType,
+    pub api_key: String,
+    pub endpoint_id: Option<String>, // For KatCoder only
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub last_used: chrono::DateTime<chrono::Utc>,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SavedCredentialStore {
+    pub credentials: Vec<SavedCredential>,
+}
+
+impl SavedCredentialStore {
+    pub fn new() -> Self {
+        Self {
+            credentials: Vec::new(),
+        }
+    }
+
+    pub fn add_credential(&mut self, credential: SavedCredential) {
+        self.credentials.push(credential);
+    }
+
+    pub fn update_last_used(&mut self, id: &str) {
+        if let Some(cred) = self.credentials.iter_mut().find(|c| c.id == id) {
+            cred.last_used = Utc::now();
+        }
+    }
+
+    pub fn delete_credential(&mut self, id: &str) -> Result<()> {
+        let index = self
+            .credentials
+            .iter()
+            .position(|c| c.id == id)
+            .ok_or_else(|| anyhow!("Credential not found"))?;
+        self.credentials.remove(index);
+        Ok(())
+    }
+
+    pub fn find_by_template(&self, template: &TemplateType) -> Vec<&SavedCredential> {
+        self.credentials
+            .iter()
+            .filter(|c| c.template_type == *template)
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, clap::ValueEnum)]
 enum SnapshotScope {
     Env,
@@ -252,6 +334,7 @@ enum TemplateType {
     DeepSeek,
     K2,
     K2Thinking,
+    KatCoder,
     Kimi,
     Longcat,
     Zai,
@@ -263,31 +346,6 @@ enum TemplateType {
 enum ZaiRegion {
     China,
     International,
-}
-
-impl Default for ClaudeSettings {
-    fn default() -> Self {
-        Self {
-            env: None,
-            model: None,
-            output_style: None,
-            include_co_authored_by: None,
-            permissions: None,
-            hooks: None,
-            api_key_helper: None,
-            cleanup_period_days: None,
-            disable_all_hooks: None,
-            force_login_method: None,
-            force_login_org_uuid: None,
-            enable_all_project_mcp_servers: None,
-            enabled_mcpjson_servers: None,
-            disabled_mcpjson_servers: None,
-            aws_auth_refresh: None,
-            aws_credential_export: None,
-            status_line: None,
-            subagent_model: None,
-        }
-    }
 }
 
 impl std::fmt::Display for SnapshotScope {
@@ -315,12 +373,267 @@ impl std::fmt::Display for TemplateType {
             TemplateType::DeepSeek => write!(f, "deepseek"),
             TemplateType::K2 => write!(f, "k2"),
             TemplateType::K2Thinking => write!(f, "k2-thinking"),
+            TemplateType::KatCoder => write!(f, "kat-coder"),
             TemplateType::Kimi => write!(f, "kimi"),
             TemplateType::Longcat => write!(f, "longcat"),
             TemplateType::Zai => write!(f, "zai"),
             TemplateType::MiniMax => write!(f, "minimax"),
         }
     }
+}
+
+// Encryption and credential storage functions
+const KEY_SIZE: usize = 32; // 32 bytes = 256 bits for AES-256
+const NONCE_SIZE: usize = NONCE_LEN; // 12 bytes nonce for AES-GCM
+
+fn get_encryption_key() -> Result<LessSafeKey> {
+    // Use a key derivation approach - we'll use a fixed key for now
+    // In production, consider using a key derived from user password or system keyring
+    let key_path = dirs::data_dir()
+        .ok_or_else(|| anyhow!("Could not find data directory"))?
+        .join("claude-switcher")
+        .join("encryption.key");
+
+    let key_bytes = if key_path.exists() {
+        let key_data =
+            fs::read(&key_path).map_err(|e| anyhow!("Failed to read encryption key: {}", e))?;
+        if key_data.len() != KEY_SIZE {
+            return Err(anyhow!("Invalid encryption key size"));
+        }
+        let mut bytes = [0u8; KEY_SIZE];
+        bytes.copy_from_slice(&key_data);
+        bytes
+    } else {
+        // Generate a new random key
+        let mut bytes = [0u8; KEY_SIZE];
+        rand::rng().fill_bytes(&mut bytes);
+
+        // Save the key
+        if let Some(parent) = key_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| anyhow!("Failed to create directory: {}", e))?;
+        }
+        fs::write(&key_path, bytes)
+            .map_err(|e| anyhow!("Failed to write encryption key: {}", e))?;
+
+        println!(
+            "  🔐 Generated new encryption key at {}",
+            key_path.display()
+        );
+        bytes
+    };
+
+    let unbound_key = UnboundKey::new(&aead::AES_256_GCM, &key_bytes)
+        .map_err(|e| anyhow!("Failed to create encryption key: {}", e))?;
+    Ok(LessSafeKey::new(unbound_key))
+}
+
+fn encrypt_data(plaintext: &str) -> Result<String> {
+    let key = get_encryption_key()?;
+
+    // Generate random nonce
+    let mut nonce_bytes = [0u8; NONCE_SIZE];
+    let rng = ring::rand::SystemRandom::new();
+    rng.fill(&mut nonce_bytes)
+        .map_err(|e| anyhow!("Failed to generate nonce: {}", e))?;
+
+    // Prepare buffer: plaintext + tag space
+    let mut buffer = plaintext.as_bytes().to_vec();
+    buffer.extend_from_slice(&[0u8; 16]); // Space for tag
+
+    // Encrypt in place
+    let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
+    let tag = key
+        .seal_in_place_separate_tag(nonce, aead::Aad::empty(), &mut buffer)
+        .map_err(|e| anyhow!("Encryption failed: {}", e))?;
+
+    // Combine: nonce + ciphertext + tag
+    let mut result = nonce_bytes.to_vec();
+    result.extend_from_slice(&buffer[..plaintext.len()]);
+    result.extend_from_slice(tag.as_ref());
+
+    Ok(general_purpose::STANDARD.encode(result))
+}
+
+fn decrypt_data(encrypted: &str) -> Result<String> {
+    let key = get_encryption_key()?;
+
+    let data = general_purpose::STANDARD
+        .decode(encrypted)
+        .map_err(|e| anyhow!("Base64 decode failed: {}", e))?;
+
+    if data.len() < NONCE_SIZE + aead::AES_256_GCM.tag_len() {
+        return Err(anyhow!("Invalid encrypted data"));
+    }
+
+    // Split: nonce | ciphertext | tag
+    let nonce_bytes: [u8; NONCE_SIZE] = data[..NONCE_SIZE]
+        .try_into()
+        .map_err(|_| anyhow!("Invalid nonce size"))?;
+    let ciphertext_and_tag = &data[NONCE_SIZE..];
+
+    // Decrypt in place
+    let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
+    let mut buffer = ciphertext_and_tag.to_vec();
+    let plaintext = key
+        .open_in_place(nonce, aead::Aad::empty(), &mut buffer)
+        .map_err(|e| anyhow!("Decryption failed: {}", e))?;
+
+    String::from_utf8(plaintext.to_vec()).map_err(|e| anyhow!("Invalid UTF-8: {}", e))
+}
+
+fn get_credential_store_path() -> Result<PathBuf> {
+    let mut data_dir = dirs::data_dir().ok_or_else(|| anyhow!("Could not find data directory"))?;
+    data_dir.push("claude-switcher");
+    data_dir.push("credentials.enc");
+    Ok(data_dir)
+}
+
+fn read_saved_credentials() -> Result<SavedCredentialStore> {
+    let path = get_credential_store_path()?;
+
+    if !path.exists() {
+        return Ok(SavedCredentialStore::new());
+    }
+
+    let encrypted_data =
+        fs::read_to_string(&path).map_err(|e| anyhow!("Failed to read credentials file: {}", e))?;
+
+    if encrypted_data.trim().is_empty() {
+        return Ok(SavedCredentialStore::new());
+    }
+
+    let decrypted_data = decrypt_data(&encrypted_data)?;
+    let store: SavedCredentialStore = serde_json::from_str(&decrypted_data)
+        .map_err(|e| anyhow!("Failed to parse credentials: {}", e))?;
+
+    Ok(store)
+}
+
+fn write_saved_credentials(store: &SavedCredentialStore) -> Result<()> {
+    let path = get_credential_store_path()?;
+
+    let json_data = serde_json::to_string_pretty(store)
+        .map_err(|e| anyhow!("Failed to serialize credentials: {}", e))?;
+
+    let encrypted_data = encrypt_data(&json_data)?;
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| anyhow!("Failed to create directory: {}", e))?;
+    }
+
+    fs::write(&path, encrypted_data)
+        .map_err(|e| anyhow!("Failed to write credentials file: {}", e))?;
+
+    Ok(())
+}
+
+fn save_credential(
+    template: &TemplateType,
+    api_key: &str,
+    endpoint_id: Option<&str>,
+    name: Option<&str>,
+) -> Result<String> {
+    let mut store = read_saved_credentials()?;
+
+    let id = Uuid::new_v4().to_string();
+    let now = Utc::now();
+
+    let credential = SavedCredential {
+        id: id.clone(),
+        template_type: template.clone(),
+        api_key: api_key.to_string(),
+        endpoint_id: endpoint_id.map(|s| s.to_string()),
+        created_at: now,
+        last_used: now,
+        name: name.map(|s| s.to_string()),
+    };
+
+    store.add_credential(credential);
+    write_saved_credentials(&store)?;
+
+    Ok(id)
+}
+
+fn prompt_for_saved_credential(template: &TemplateType) -> Result<Option<SavedCredential>> {
+    let store = read_saved_credentials()?;
+    let mut credentials = store.find_by_template(template);
+
+    if credentials.is_empty() {
+        return Ok(None);
+    }
+
+    // Sort by last used (most recent first)
+    credentials.sort_by(|a, b| b.last_used.cmp(&a.last_used));
+
+    use inquire::Select;
+
+    println!(
+        "\n  💾 Found {} saved credential(s) for {}",
+        credentials.len(),
+        template
+    );
+
+    let mut options = Vec::new();
+    for (i, cred) in credentials.iter().enumerate() {
+        let default_name = format!("Credential {}", i + 1);
+        let name = cred.name.as_deref().unwrap_or(&default_name);
+        let age = Utc::now().signed_duration_since(cred.last_used);
+        let time_ago = if age.num_days() > 0 {
+            format!("{}d ago", age.num_days())
+        } else if age.num_hours() > 0 {
+            format!("{}h ago", age.num_hours())
+        } else if age.num_minutes() > 0 {
+            format!("{}m ago", age.num_minutes())
+        } else {
+            "just now".to_string()
+        };
+
+        let endpoint_info = cred
+            .endpoint_id
+            .as_ref()
+            .map(|id| format!(", Endpoint: {}", id))
+            .unwrap_or_default();
+
+        options.push(format!(
+            "{} (last used: {}){}",
+            name, time_ago, endpoint_info
+        ));
+    }
+    options.push("Enter new credential".to_string());
+
+    let choice = Select::new("Select a credential or enter new one:", options)
+        .prompt()
+        .map_err(|e| anyhow!("Failed to get selection: {}", e))?;
+
+    if choice == "Enter new credential" {
+        return Ok(None);
+    }
+
+    // Extract index from choice
+    let selected_index = credentials
+        .iter()
+        .position(|cred| {
+            let default_name = format!(
+                "Credential {}",
+                credentials
+                    .iter()
+                    .position(|c| c.id == cred.id)
+                    .unwrap_or(0)
+                    + 1
+            );
+            let name = cred.name.as_deref().unwrap_or(&default_name);
+            choice.starts_with(name)
+        })
+        .ok_or_else(|| anyhow!("Invalid selection"))?;
+
+    Ok(Some(credentials[selected_index].clone()))
+}
+
+fn delete_saved_credential(id: &str) -> Result<()> {
+    let mut store = read_saved_credentials()?;
+    store.delete_credential(id)?;
+    write_saved_credentials(&store)?;
+    Ok(())
 }
 
 fn main() -> Result<()> {
@@ -357,6 +670,10 @@ fn main() -> Result<()> {
             yes,
         }),
         Commands::Delete { name, yes } => delete_command(name, yes),
+        Commands::Credentials { command } => match command {
+            CredentialCommands::List => credentials_list_command(),
+            CredentialCommands::Delete { id, yes } => credentials_delete_command(id, yes),
+        },
     }
 }
 
@@ -446,7 +763,7 @@ fn filter_settings_by_scope(settings: &ClaudeSettings, scope: &SnapshotScope) ->
             env: settings.env.clone(),
             model: settings.model.clone(),
             output_style: settings.output_style.clone(),
-            include_co_authored_by: settings.include_co_authored_by.clone(),
+            include_co_authored_by: settings.include_co_authored_by,
             permissions: settings.permissions.clone(),
             hooks: settings.hooks.clone(),
             status_line: settings.status_line.clone(),
@@ -463,6 +780,7 @@ fn get_template_type(target: &str) -> Option<TemplateType> {
         "glm" | "zhipu" | "zai" => Some(TemplateType::Zai),
         "k2" | "moonshot" => Some(TemplateType::K2),
         "k2-thinking" | "k2thinking" => Some(TemplateType::K2Thinking),
+        "kat-coder" | "katcoder" | "kat" => Some(TemplateType::KatCoder),
         "kimi" | "kimi-for-coding" => Some(TemplateType::Kimi),
         "longcat" => Some(TemplateType::Longcat),
         "minimax" | "minimax-anthropic" => Some(TemplateType::MiniMax),
@@ -543,7 +861,7 @@ fn create_zai_template(api_key: &str, region: &ZaiRegion) -> ClaudeSettings {
     env.insert("ANTHROPIC_MODEL".to_string(), "glm-4.6".to_string());
     env.insert(
         "ANTHROPIC_SMALL_FAST_MODEL".to_string(),
-        "glm-4.6-air".to_string(),
+        "glm-4.6".to_string(),
     );
     env.insert("ENABLE_THINKING".to_string(), "true".to_string());
     env.insert("REASONING_EFFORT".to_string(), "ultrathink".to_string());
@@ -909,6 +1227,71 @@ fn create_k2_template(api_key: &str) -> ClaudeSettings {
     }
 }
 
+fn create_kat_coder_template(api_key: &str, endpoint_id: &str) -> ClaudeSettings {
+    let mut env = std::collections::HashMap::new();
+
+    // Construct base URL with endpoint ID
+    let base_url = format!(
+        "https://wanqing.streamlakeapi.com/api/gateway/v1/endpoints/{}/claude-code-proxy",
+        endpoint_id
+    );
+
+    env.insert("ANTHROPIC_BASE_URL".to_string(), base_url);
+    env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.to_string());
+    env.insert(
+        "ANTHROPIC_MODEL".to_string(),
+        "KAT-Coder-Pro-V1".to_string(),
+    );
+    env.insert(
+        "ANTHROPIC_SMALL_FAST_MODEL".to_string(),
+        "KAT-Coder-Air-V1".to_string(),
+    );
+    env.insert("API_TIMEOUT_MS".to_string(), "600000".to_string());
+    env.insert(
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),
+        "1".to_string(),
+    );
+
+    let permissions = Permissions {
+        allow: Some(vec![
+            "Bash".to_string(),
+            "Read".to_string(),
+            "Write".to_string(),
+            "Edit".to_string(),
+            "MultiEdit".to_string(),
+            "Glob".to_string(),
+            "Grep".to_string(),
+            "WebFetch".to_string(),
+        ]),
+        ask: None,
+        deny: Some(vec!["WebSearch".to_string()]),
+        additional_directories: None,
+        default_mode: None,
+        disable_bypass_permissions_mode: None,
+    };
+
+    ClaudeSettings {
+        env: Some(env),
+        model: Some("KAT-Coder-Pro-V1".to_string()),
+        output_style: None,
+        include_co_authored_by: Some(true),
+        permissions: Some(permissions),
+        hooks: None,
+        api_key_helper: None,
+        cleanup_period_days: None,
+        disable_all_hooks: None,
+        force_login_method: None,
+        force_login_org_uuid: None,
+        enable_all_project_mcp_servers: None,
+        enabled_mcpjson_servers: None,
+        disabled_mcpjson_servers: None,
+        aws_auth_refresh: None,
+        aws_credential_export: None,
+        status_line: None,
+        subagent_model: None,
+    }
+}
+
 fn get_template_api_key(template: &TemplateType) -> Result<String> {
     // Try to get from environment first
     let env_var = match template {
@@ -916,6 +1299,7 @@ fn get_template_api_key(template: &TemplateType) -> Result<String> {
         TemplateType::Zai => "Z_AI_API_KEY",
         TemplateType::K2 => "MOONSHOT_API_KEY",
         TemplateType::K2Thinking => "MOONSHOT_API_KEY",
+        TemplateType::KatCoder => "KAT_CODER_API_KEY",
         TemplateType::Kimi => "KIMI_API_KEY",
         TemplateType::Longcat => "LONGCAT_API_KEY",
         TemplateType::MiniMax => "MINIMAX_API_KEY",
@@ -924,6 +1308,27 @@ fn get_template_api_key(template: &TemplateType) -> Result<String> {
     if let Ok(key) = std::env::var(env_var) {
         println!("  ✓ Using API key from environment variable {}", env_var);
         return Ok(key);
+    }
+
+    // Check for saved credentials
+    if atty::is(atty::Stream::Stdin) {
+        match prompt_for_saved_credential(template)? {
+            Some(saved_credential) => {
+                // Update last used timestamp
+                let mut store = read_saved_credentials()?;
+                store.update_last_used(&saved_credential.id);
+                write_saved_credentials(&store)?;
+
+                println!("  ✓ Using saved API key");
+                if let Some(name) = &saved_credential.name {
+                    println!("  ✓ Credential: {}", name);
+                }
+                return Ok(saved_credential.api_key);
+            }
+            None => {
+                // User chose to enter new credential
+            }
+        }
     }
 
     // If not found and we're in non-interactive mode, error
@@ -947,6 +1352,43 @@ fn get_template_api_key(template: &TemplateType) -> Result<String> {
         return Err(anyhow!("API key cannot be empty"));
     }
 
+    // Ask if user wants to save to encrypted storage
+    let save_encrypted =
+        Confirm::new("Save this credential to encrypted local storage for future use?")
+            .with_default(true)
+            .prompt()
+            .unwrap_or(false);
+
+    if save_encrypted {
+        let name_prompt = "Enter a name for this credential (optional):".to_string();
+        let name = Text::new(&name_prompt).prompt().ok().and_then(|n| {
+            let trimmed = n.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
+
+        let endpoint_id = if *template == TemplateType::KatCoder {
+            match get_kat_coder_endpoint_id() {
+                Ok(id) => Some(id),
+                Err(e) => {
+                    println!("  ⚠️  Failed to get endpoint ID: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        let endpoint_id_ref = endpoint_id.as_deref();
+        match save_credential(template, &key, endpoint_id_ref, name.as_deref()) {
+            Ok(id) => println!("  ✓ Credential saved with ID: {}", id),
+            Err(e) => println!("  ⚠️  Failed to save credential: {}", e),
+        }
+    }
+
     // Ask if user wants to save to environment
     let save_env = Confirm::new(&format!(
         "Save {} to environment variable for future use?",
@@ -964,6 +1406,55 @@ fn get_template_api_key(template: &TemplateType) -> Result<String> {
     Ok(key)
 }
 
+fn get_kat_coder_endpoint_id() -> Result<String> {
+    // Try to get from environment first
+    let env_var = "WANQING_ENDPOINT_ID";
+
+    if let Ok(id) = std::env::var(env_var) {
+        println!(
+            "  ✓ Using endpoint ID from environment variable {}",
+            env_var
+        );
+        return Ok(id);
+    }
+
+    // If not found and we're in non-interactive mode, error
+    if !atty::is(atty::Stream::Stdin) {
+        return Err(anyhow!(
+            "Endpoint ID required for kat-coder template. Set {} environment variable or use interactive mode.",
+            env_var
+        ));
+    }
+
+    // Prompt user for endpoint ID
+    use inquire::{Confirm, Text};
+
+    let prompt = "Enter WanQing endpoint ID (format: ep-xxx-xxx):";
+    let endpoint_id = Text::new(prompt)
+        .prompt()
+        .map_err(|e| anyhow!("Failed to read input: {}", e))?;
+
+    if endpoint_id.trim().is_empty() {
+        return Err(anyhow!("Endpoint ID cannot be empty"));
+    }
+
+    // Ask if user wants to save to environment
+    let save_env = Confirm::new(&format!(
+        "Save {} to environment variable for future use?",
+        env_var
+    ))
+    .with_default(false)
+    .prompt()
+    .unwrap_or(false);
+
+    if save_env {
+        println!("  💡 To save permanently, add this to your shell profile:");
+        println!("     export {}=\"***\"", env_var);
+    }
+
+    Ok(endpoint_id)
+}
+
 fn apply_template(
     template: &TemplateType,
     scope: &SnapshotScope,
@@ -978,6 +1469,11 @@ fn apply_template(
         TemplateType::Zai => create_zai_template(&api_key, &ZaiRegion::China),
         TemplateType::K2 => create_k2_template(&api_key),
         TemplateType::K2Thinking => create_k2_thinking_template(&api_key),
+        TemplateType::KatCoder => {
+            // For KatCoder, we need to get the endpoint ID
+            let endpoint_id = get_kat_coder_endpoint_id()?;
+            create_kat_coder_template(&api_key, &endpoint_id)
+        }
         TemplateType::Kimi => create_kimi_template(&api_key),
         TemplateType::Longcat => create_longcat_template(&api_key, false),
         TemplateType::MiniMax => create_minimax_template(&api_key),
@@ -1043,18 +1539,14 @@ fn read_project_settings(project_dir: &Path) -> Result<ClaudeSettings> {
 }
 
 fn read_enterprise_settings() -> Result<ClaudeSettings> {
-    #[cfg(target_os = "windows")]
-    let enterprise_path = Path::new("C:\\ProgramData\\ClaudeCode\\managed-settings.json");
+    // Use system-wide config directory for enterprise settings
+    let config_dir =
+        dirs::config_dir().ok_or_else(|| anyhow!("Unable to determine system config directory"))?;
 
-    #[cfg(target_os = "macos")]
-    let enterprise_path =
-        Path::new("/Library/Application Support/ClaudeCode/managed-settings.json");
-
-    #[cfg(target_os = "linux")]
-    let enterprise_path = Path::new("/etc/claude-code/managed-settings.json");
+    let enterprise_path = config_dir.join("ClaudeCode").join("managed-settings.json");
 
     if enterprise_path.exists() {
-        read_settings_file(enterprise_path)
+        read_settings_file(&enterprise_path)
     } else {
         Ok(ClaudeSettings::default())
     }
@@ -1220,11 +1712,11 @@ fn get_merged_settings(
     merged = merge_settings(merged, enterprise_settings);
 
     // If a specific settings file is provided, treat it as highest priority
-    if let Some(custom_path) = settings_path {
-        if custom_path.exists() {
-            let custom_settings = read_settings_file(&custom_path)?;
-            merged = merge_settings(merged, custom_settings);
-        }
+    if let Some(custom_path) = settings_path
+        && custom_path.exists()
+    {
+        let custom_settings = read_settings_file(&custom_path)?;
+        merged = merge_settings(merged, custom_settings);
     }
 
     // 4. Environment variables (highest priority when capturing)
@@ -1309,8 +1801,7 @@ fn format_settings_for_display(settings: &ClaudeSettings, scope: &SnapshotScope)
 }
 
 fn mask_api_key(api_key: &str) -> String {
-    if api_key.starts_with("sk-") {
-        let actual_key = &api_key[3..];
+    if let Some(actual_key) = api_key.strip_prefix("sk-") {
         let actual_len = actual_key.len();
 
         if actual_len <= 6 {
@@ -1330,23 +1821,21 @@ fn mask_api_key(api_key: &str) -> String {
                 api_key.len()
             )
         }
+    } else if api_key.len() <= 8 {
+        "*".repeat(api_key.len())
+    } else if api_key.len() <= 16 {
+        format!("{}***{}", &api_key[..3], &api_key[api_key.len() - 3..])
     } else {
-        if api_key.len() <= 8 {
-            "*".repeat(api_key.len())
-        } else if api_key.len() <= 16 {
-            format!("{}***{}", &api_key[..3], &api_key[api_key.len() - 3..])
-        } else {
-            let visible_start = &api_key[..4];
-            let visible_end = &api_key[api_key.len() - 4..];
-            let masked_length = api_key.len() - 8;
-            format!(
-                "{}{}...{} ({} chars)",
-                visible_start,
-                "*".repeat(std::cmp::min(masked_length, 8)),
-                visible_end,
-                api_key.len()
-            )
-        }
+        let visible_start = &api_key[..4];
+        let visible_end = &api_key[api_key.len() - 4..];
+        let masked_length = api_key.len() - 8;
+        format!(
+            "{}{}...{} ({} chars)",
+            visible_start,
+            "*".repeat(std::cmp::min(masked_length, 8)),
+            visible_end,
+            api_key.len()
+        )
     }
 }
 
@@ -1601,6 +2090,105 @@ fn delete_command(name: String, yes: bool) -> Result<()> {
     Ok(())
 }
 
+fn credentials_list_command() -> Result<()> {
+    let store = read_saved_credentials()?;
+
+    if store.credentials.is_empty() {
+        println!("\n🔐 No saved credentials found.");
+        println!("💡 Credentials are automatically saved when you apply templates.");
+        return Ok(());
+    }
+
+    println!(
+        "\n🔐 Saved Credentials ({} total):",
+        store.credentials.len()
+    );
+    println!("{}", "─".repeat(80));
+
+    // Sort by last used (most recent first)
+    let mut credentials = store.credentials.clone();
+    credentials.sort_by(|a, b| b.last_used.cmp(&a.last_used));
+
+    for (index, cred) in credentials.iter().enumerate() {
+        let name = cred.name.as_deref().unwrap_or("Unnamed");
+        let created = cred.created_at.format("%Y-%m-%d %H:%M:%S");
+        let last_used = cred.last_used.format("%Y-%m-%d %H:%M:%S");
+
+        println!("\n{}. {}", index + 1, console::style(name).bold());
+        println!("   🆔 ID: {}", cred.id);
+        println!("   🎯 Template: {}", cred.template_type);
+        println!("   📅 Created: {}", created);
+        println!("   🕒 Last used: {}", last_used);
+
+        if let Some(endpoint_id) = &cred.endpoint_id {
+            println!("   🔧 Endpoint: {}", endpoint_id);
+        }
+
+        // Masked API key (show first 8 and last 4 chars)
+        let masked_key = if cred.api_key.len() > 12 {
+            format!(
+                "{}...{}",
+                &cred.api_key[..8],
+                &cred.api_key[cred.api_key.len() - 4..]
+            )
+        } else {
+            "***".to_string()
+        };
+        println!("   🔑 API key: {}", masked_key);
+    }
+
+    println!("\n{}", "─".repeat(80));
+    println!("💡 Delete a credential with: ccs credentials delete <id>");
+
+    Ok(())
+}
+
+fn credentials_delete_command(id: String, yes: bool) -> Result<()> {
+    let store = read_saved_credentials()?;
+
+    // Find the credential
+    let credential = store
+        .credentials
+        .iter()
+        .find(|c| c.id == id)
+        .ok_or_else(|| anyhow!("Credential with ID '{}' not found", id))?;
+
+    // Show confirmation prompt if not bypassed
+    if !yes && atty::is(atty::Stream::Stdin) {
+        use inquire::Select;
+
+        println!("🗑️  Delete credential");
+        println!("{}", "─".repeat(60));
+        println!("🆔 ID: {}", credential.id);
+        println!("🎯 Template: {}", credential.template_type);
+        println!(
+            "📅 Created: {}",
+            credential.created_at.format("%Y-%m-%d %H:%M:%S UTC")
+        );
+        if let Some(name) = &credential.name {
+            println!("📝 Name: {}", name);
+        }
+        println!("{}", "─".repeat(60));
+
+        let options = vec!["🗑️  Yes, delete it", "❌ No, keep it"];
+        let choice = Select::new("Are you sure you want to delete this credential?", options)
+            .prompt()
+            .map_err(|e| anyhow!("Failed to get user input: {}", e))?;
+
+        if choice == "❌ No, keep it" {
+            println!("❌ Operation cancelled.");
+            return Ok(());
+        }
+    }
+
+    // Delete the credential
+    delete_saved_credential(&id)?;
+
+    println!("✅ Credential '{}' deleted successfully", id);
+
+    Ok(())
+}
+
 fn list_command(verbose: bool) -> Result<()> {
     let store = read_snapshot_store()?;
 
@@ -1719,6 +2307,7 @@ fn list_command(verbose: bool) -> Result<()> {
     println!("  🤖 glm               - GLM/Zhipu AI");
     println!("  🌙 k2                - Moonshot K2 API");
     println!("  🧠 k2-thinking       - Moonshot K2 Thinking API (high-speed, 256K context)");
+    println!("  🔧 kat-coder         - WanQing KAT-Coder (万擎)");
     println!("  🌟 kimi              - Kimi For Coding API");
     println!("  🐱 longcat           - Longcat Chat API");
     println!("  🔥 minimax           - MiniMax API (recommended)");
@@ -1728,6 +2317,7 @@ fn list_command(verbose: bool) -> Result<()> {
     println!("  ccs apply glm --model glm-4-plus     # Apply GLM with custom model");
     println!("  ccs apply k2                          # Apply Moonshot K2 template");
     println!("  ccs apply k2-thinking                  # Apply Moonshot K2 Thinking template");
+    println!("  ccs apply kat-coder                    # Apply WanQing KAT-Coder template");
     println!("  ccs apply kimi                        # Apply Kimi For Coding template");
     println!("  ccs apply minimax                     # Apply MiniMax template");
     println!("  ccs apply my-snapshot --backup       # Apply snapshot with backup");
