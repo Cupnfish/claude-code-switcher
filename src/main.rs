@@ -21,14 +21,7 @@ use ring::{
 #[command(
     long_about = "A CLI tool for creating, managing, and switching between Claude Code settings snapshots.
 
-Perfect for developers who work with multiple AI models or need to switch between different Claude Code configurations.
-
-Examples:
-    ccs snap my-env         # Create snapshot of current settings
-    ccs apply my-env        # Apply snapshot to current project
-    ccs apply deepseek      # Apply DeepSeek template
-    ccs apply minimax       # Apply MiniMax Anthropic template
-    ccs ls -v               # List snapshots with details"
+Perfect for developers who work with multiple AI models or need to switch between different Claude Code configurations."
 )]
 #[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(author = "Cupnfish")]
@@ -130,6 +123,13 @@ enum CredentialCommands {
         /// ID of the credential to delete
         id: String,
 
+        /// Skip confirmation prompt
+        #[arg(long, help = "Skip confirmation prompt")]
+        yes: bool,
+    },
+
+    /// Clear all saved credentials (useful when migrating between versions)
+    Clear {
         /// Skip confirmation prompt
         #[arg(long, help = "Skip confirmation prompt")]
         yes: bool,
@@ -462,13 +462,13 @@ fn decrypt_data(encrypted: &str) -> Result<String> {
         .map_err(|e| anyhow!("Base64 decode failed: {}", e))?;
 
     if data.len() < NONCE_SIZE + aead::AES_256_GCM.tag_len() {
-        return Err(anyhow!("Invalid encrypted data"));
+        return Err(anyhow!("Invalid encrypted data format: data too short"));
     }
 
     // Split: nonce | ciphertext | tag
     let nonce_bytes: [u8; NONCE_SIZE] = data[..NONCE_SIZE]
         .try_into()
-        .map_err(|_| anyhow!("Invalid nonce size"))?;
+        .map_err(|_| anyhow!("Invalid nonce format"))?;
     let ciphertext_and_tag = &data[NONCE_SIZE..];
 
     // Decrypt in place
@@ -476,9 +476,29 @@ fn decrypt_data(encrypted: &str) -> Result<String> {
     let mut buffer = ciphertext_and_tag.to_vec();
     let plaintext = key
         .open_in_place(nonce, aead::Aad::empty(), &mut buffer)
-        .map_err(|e| anyhow!("Decryption failed: {}", e))?;
+        .map_err(|e| {
+            // Check if this is a decryption failure (likely due to format change or corrupted data)
+            if e.to_string().contains("Unspecified") {
+                anyhow!(
+                    "Decryption failed. This usually means:\n\
+                     1. The credential file was encrypted with an older version and needs migration, or\n\
+                     2. The credential file is corrupted.\n\
+                     \n\
+                     To fix this:\n\
+                     - Run 'ccs credentials clear' to reset all saved credentials, or\n\
+                     - Delete the file manually: {}\n\
+                     \n\
+                     Then re-save your credentials by applying templates again.",
+                    get_credential_store_path()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|_| "<unknown path>".to_string())
+                )
+            } else {
+                anyhow!("Decryption failed: {}", e)
+            }
+        })?;
 
-    String::from_utf8(plaintext.to_vec()).map_err(|e| anyhow!("Invalid UTF-8: {}", e))
+    String::from_utf8(plaintext.to_vec()).map_err(|e| anyhow!("Invalid UTF-8 text encoding: {}", e))
 }
 
 fn get_credential_store_path() -> Result<PathBuf> {
@@ -502,7 +522,23 @@ fn read_saved_credentials() -> Result<SavedCredentialStore> {
         return Ok(SavedCredentialStore::new());
     }
 
-    let decrypted_data = decrypt_data(&encrypted_data)?;
+    let decrypted_data = decrypt_data(&encrypted_data).map_err(|e| {
+        anyhow!(
+            "Failed to decrypt credentials: {}\n\
+             \n\
+             This error occurred while trying to read your saved credentials from:\n\
+             {}\n\
+             \n\
+             Suggested actions:\n\
+             1. Run 'ccs credentials clear' to reset all saved credentials, then\n\
+             2. Re-run 'ccs apply <template>' to save new credentials\n\
+             \n\
+             If you continue to see this error, you may need to manually delete the file.",
+            e,
+            path.display()
+        )
+    })?;
+
     let store: SavedCredentialStore = serde_json::from_str(&decrypted_data)
         .map_err(|e| anyhow!("Failed to parse credentials: {}", e))?;
 
@@ -673,6 +709,7 @@ fn main() -> Result<()> {
         Commands::Credentials { command } => match command {
             CredentialCommands::List => credentials_list_command(),
             CredentialCommands::Delete { id, yes } => credentials_delete_command(id, yes),
+            CredentialCommands::Clear { yes } => credentials_clear_command(yes),
         },
     }
 }
@@ -2091,7 +2128,32 @@ fn delete_command(name: String, yes: bool) -> Result<()> {
 }
 
 fn credentials_list_command() -> Result<()> {
-    let store = read_saved_credentials()?;
+    // Attempt to read credentials with better error handling
+    let store = match read_saved_credentials() {
+        Ok(s) => s,
+        Err(e) => {
+            // Check if this is a decryption error
+            let error_msg = e.to_string();
+            if error_msg.contains("Failed to decrypt credentials") || error_msg.contains("Decryption failed") {
+                println!("\n❌ Error reading saved credentials");
+                println!("{}", "─".repeat(60));
+                println!("🔐 The credential file appears to be corrupted or was");
+                println!("   created with an incompatible encryption format.");
+                println!();
+                println!("💡 To fix this issue:");
+                println!("   1. Run: ccs credentials clear --yes");
+                println!("   2. Re-run your templates: ccs apply <template>");
+                println!();
+                println!("   This will reset your saved credentials and allow you");
+                println!("   to save new ones using the current encryption format.");
+                println!("{}", "─".repeat(60));
+                return Ok(()); // Return Ok since this is a handled error
+            } else {
+                // For other errors, return them normally
+                return Err(e);
+            }
+        }
+    };
 
     if store.credentials.is_empty() {
         println!("\n🔐 No saved credentials found.");
@@ -2185,6 +2247,57 @@ fn credentials_delete_command(id: String, yes: bool) -> Result<()> {
     delete_saved_credential(&id)?;
 
     println!("✅ Credential '{}' deleted successfully", id);
+
+    Ok(())
+}
+
+fn credentials_clear_command(yes: bool) -> Result<()> {
+    let path = get_credential_store_path()?;
+
+    // Check if file exists
+    if !path.exists() {
+        println!("✅ No credentials to clear (file doesn't exist)");
+        return Ok(());
+    }
+
+    // Get file size for confirmation
+    let metadata = fs::metadata(&path)
+        .map_err(|e| anyhow!("Failed to read credential file metadata: {}", e))?;
+    let file_size = metadata.len();
+
+    // Show confirmation prompt if not bypassed
+    if !yes && atty::is(atty::Stream::Stdin) {
+        use inquire::Select;
+
+        println!("⚠️  Clear all saved credentials");
+        println!("{}", "─".repeat(60));
+        println!("📁 File: {}", path.display());
+        println!("📊 Size: {} bytes", file_size);
+        println!("{}", "─".repeat(60));
+        println!("\nThis will permanently delete ALL saved credentials.\n");
+
+        let options = vec!["⚠️  Yes, clear all credentials", "❌ No, keep them"];
+        let choice = Select::new(
+            "Are you sure you want to clear all credentials?",
+            options,
+        )
+        .prompt()
+        .map_err(|e| anyhow!("Failed to get user input: {}", e))?;
+
+        if choice == "❌ No, keep them" {
+            println!("❌ Operation cancelled.");
+            return Ok(());
+        }
+    }
+
+    // Clear the file by overwriting with empty content
+    fs::write(&path, "")
+        .map_err(|e| anyhow!("Failed to clear credentials file: {}", e))?;
+
+    println!("✅ All credentials cleared successfully");
+    println!();
+    println!("💡 You can now re-save your credentials by running templates again:");
+    println!("   ccs apply <template>");
 
     Ok(())
 }

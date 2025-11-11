@@ -73,9 +73,13 @@ ccs credentials list
 # 删除某个凭证（使用 ID）
 ccs credentials delete <credential-id>
 
+# 清除所有凭证（用于解决加密格式不兼容问题）
+ccs credentials clear
+
 # 或者使用简写
 ccs creds list
 ccs creds delete <credential-id>
+ccs creds clear
 ```
 
 保存的凭证使用 AES-256-GCM 加密存储在本地，每个凭证包含：
