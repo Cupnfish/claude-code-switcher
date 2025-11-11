@@ -1,11 +1,15 @@
 [package]
 name = "claude-code-switcher"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2024"
 authors = ["cupnfish <cupnfish@icloud.com>"]
 repository = "https://github.com/Cupnfish/claude-code-switcher"
 description = "A CLI tool for managing Claude Code setting snapshots and templates"
 license = "MIT"
+
+[lib]
+name = "claude_code_switcher"
+path = "src/lib.rs"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
@@ -18,9 +22,7 @@ uuid = { version = "1.18", features = ["v4", "serde"] }
 inquire = "0.9"
 atty = "0.2"
 console = "0.16"
-ring = "0.17"
-base64 = "0.22"
-rand = "0.9"
+
 
 [[bin]]
 name = "ccs"
