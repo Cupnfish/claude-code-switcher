@@ -20,6 +20,10 @@ impl Template for DeepSeekTemplate {
         "DEEPSEEK_API_KEY"
     }
 
+    fn env_var_names(&self) -> Vec<&'static str> {
+        vec!["DEEPSEEK_API_KEY", "DEEPSEEK_API_TOKEN", "DEEPSEEK_TOKEN"]
+    }
+
     fn display_name(&self) -> &'static str {
         "DeepSeek"
     }

@@ -14,8 +14,13 @@ pub trait Template {
     /// Get the template type identifier
     fn template_type(&self) -> TemplateType;
 
-    /// Get the environment variable name for the API key
+    /// Get the environment variable name for the API key (primary)
     fn env_var_name(&self) -> &'static str;
+
+    /// Get all supported environment variable names for this provider
+    fn env_var_names(&self) -> Vec<&'static str> {
+        vec![self.env_var_name()]
+    }
 
     /// Create Claude settings for this template
     fn create_settings(&self, api_key: &str, scope: &SnapshotScope) -> ClaudeSettings;
@@ -175,6 +180,12 @@ pub fn get_env_var_name(template_type: &TemplateType) -> &'static str {
         TemplateType::MiniMax => "MINIMAX_API_KEY",
         TemplateType::SeedCode => "ARK_API_KEY",
     }
+}
+
+/// Get all supported environment variable names for a template type
+pub fn get_env_var_names(template_type: &TemplateType) -> Vec<&'static str> {
+    let template_instance = get_template_instance(template_type);
+    template_instance.env_var_names()
 }
 
 /// Get a template instance by type and original input string

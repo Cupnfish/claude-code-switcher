@@ -14,40 +14,9 @@ pub struct Cli {
 /// Available CLI commands
 #[derive(Subcommand)]
 pub enum Commands {
-    /// List available snapshots [aliases: l, ls]
+    /// List and manage snapshots [aliases: l, ls]
     #[command(alias = "l", alias = "ls")]
-    List {
-        /// Show detailed information
-        #[arg(long, short, help = "Show detailed information about each snapshot")]
-        verbose: bool,
-    },
-
-    /// Create a snapshot of current settings [alias: s]
-    #[command(alias = "s")]
-    Snap {
-        /// Name for the snapshot
-        name: String,
-
-        /// What to include in the snapshot (default: common)
-        #[arg(
-            long,
-            default_value = "common",
-            help = "Scope of settings to include in snapshot"
-        )]
-        scope: SnapshotScope,
-
-        /// Path to settings file (default: .claude/settings.json)
-        #[arg(long, help = "Path to settings file (default: .claude/settings.json)")]
-        settings_path: Option<PathBuf>,
-
-        /// Description for the snapshot
-        #[arg(long, help = "Description for the snapshot")]
-        description: Option<String>,
-
-        /// Overwrite existing snapshot with same name
-        #[arg(long, help = "Overwrite existing snapshot with same name")]
-        overwrite: bool,
-    },
+    List,
 
     /// Apply a snapshot or template [alias: a]
     #[command(alias = "a")]
@@ -76,35 +45,21 @@ pub enum Commands {
         yes: bool,
     },
 
-    /// Delete a snapshot [aliases: rm, remove, del]
-    #[command(alias = "rm", alias = "remove", alias = "del")]
-    Delete {
-        /// Name of the snapshot to delete
-        name: String,
-
-        /// Skip confirmation prompt
-        #[arg(long, help = "Skip confirmation prompt")]
-        yes: bool,
+    /// Manage saved credentials [aliases: creds, cred]
+    #[command(alias = "creds", alias = "cred")]
+    Credentials {
+        /// Subcommand for credential management
+        #[command(subcommand)]
+        command: CredentialCommands,
     },
-
-    /// Manage saved credentials
-    #[command(subcommand)]
-    Credentials(CredentialCommands),
 }
 
 /// Credential management commands
 #[derive(Subcommand)]
 pub enum CredentialCommands {
-    /// List saved credentials
-    #[command(alias = "ls")]
+    /// List saved credentials [aliases: l, ls]
+    #[command(alias = "l", alias = "ls")]
     List,
-
-    /// Delete a saved credential
-    #[command(alias = "rm")]
-    Delete {
-        /// ID of the credential to delete
-        id: String,
-    },
 
     /// Clear all saved credentials
     Clear {

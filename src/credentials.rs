@@ -15,7 +15,7 @@ use std::fs;
 use std::path::PathBuf;
 use uuid::Uuid;
 
-use crate::TemplateType;
+use crate::templates::TemplateType;
 
 /// Current credential data format version
 pub const CURRENT_CREDENTIAL_VERSION: &str = "v2";
@@ -297,6 +297,62 @@ impl CredentialStore {
         })
     }
 
+    /// Generate a smart credential name with auto-incrementing numbers
+    pub fn generate_smart_name(
+        &self,
+        template_type: &TemplateType,
+        base_name: Option<&str>,
+    ) -> Result<String> {
+        let binding = template_type.to_string();
+        let base = base_name.unwrap_or(&binding);
+
+        // Get existing credentials for this template type
+        let existing_credentials = self
+            .store
+            .find_by_template_type(template_type)
+            .unwrap_or_default();
+
+        // Extract existing names and find the highest number
+        let mut max_number = 0;
+        let mut has_base_name = false;
+
+        for credential in &existing_credentials {
+            let name = credential.name();
+            if name.starts_with(base) {
+                has_base_name = true;
+                // Extract number if it exists (e.g., "deepseek-2" -> 2)
+                if let Some(number_part) = name.strip_prefix(&format!("{}-", base))
+                    && let Ok(number) = number_part.parse::<u32>()
+                {
+                    max_number = max_number.max(number);
+                }
+            }
+        }
+
+        // Generate name with auto-incrementing number if base already exists
+        if has_base_name {
+            Ok(format!("{}-{}", base, max_number + 1))
+        } else {
+            Ok(base.to_string())
+        }
+    }
+
+    /// Create and save a new credential with smart naming
+    pub fn create_credential_smart(
+        &self,
+        api_key: &str,
+        template_type: TemplateType,
+        custom_name: Option<&str>,
+    ) -> Result<SavedCredential> {
+        let name = if let Some(custom_name) = custom_name {
+            custom_name.to_string()
+        } else {
+            self.generate_smart_name(&template_type, None)?
+        };
+
+        self.create_credential(name, api_key, template_type)
+    }
+
     /// Create and save a new credential
     pub fn create_credential(
         &self,
@@ -473,7 +529,7 @@ pub fn get_api_key_interactively(template_type: TemplateType) -> Result<String> 
     }
 
     // Get saved credentials
-    let credentials = if let Ok(credential_store) = CredentialStore::new() {
+    let _credentials = if let Ok(credential_store) = CredentialStore::new() {
         credential_store
             .store
             .find_by_template_type(&template_type)
@@ -482,19 +538,18 @@ pub fn get_api_key_interactively(template_type: TemplateType) -> Result<String> 
         Vec::new()
     };
 
-    // Use simple selector
-    let mut selector =
-        crate::simple_selector::SimpleCredentialSelector::new(credentials, template_type.clone());
-
-    match selector.run()? {
+    // Use new credential selector
+    // Clone template_type for use in the selector and later for saving
+    let template_type_clone = template_type.clone();
+    match crate::selectors::credential::CredentialSelector::select_api_key(template_type)? {
         Some(api_key) => {
             // Auto-save the credential if it's new
             if let Ok(credential_store) = CredentialStore::new()
-                && !credential_store.has_api_key(&api_key, &template_type)
+                && !credential_store.has_api_key(&api_key, &template_type_clone)
             {
-                let default_name = format!("{} API Key", template_type);
+                let default_name = format!("{} API Key", template_type_clone);
                 if credential_store
-                    .create_credential(default_name, &api_key, template_type)
+                    .create_credential(default_name, &api_key, template_type_clone)
                     .is_ok()
                 {
                     println!("✓ API key saved automatically for future use.");

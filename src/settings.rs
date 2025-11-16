@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use crate::{Configurable, SnapshotScope, TemplateType};
+use crate::Configurable;
+use crate::snapshots::SnapshotScope;
+use crate::templates::TemplateType;
 
 /// Main Claude Code settings structure
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]

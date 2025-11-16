@@ -1,29 +1,24 @@
 use crate::{
-    Configurable, CredentialManager,
+    Configurable, CredentialManager, cli,
     credentials::{CredentialStore, get_api_key_interactively},
     settings::{ClaudeSettings, format_settings_comparison, format_settings_for_display},
-    snapshots::{SnapshotScope, SnapshotStore},
+    snapshots::{self, SnapshotScope, SnapshotStore},
     templates::{Template, TemplateType, get_template_instance_with_input, get_template_type},
     utils::{
         backup_settings, confirm_action, get_credentials_dir, get_settings_path, get_snapshots_dir,
     },
 };
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use console::style;
 use std::path::PathBuf;
 
 /// Run a command based on CLI arguments
 pub fn run_command(args: &crate::Cli) -> Result<()> {
     match &args.command {
-        crate::Commands::List { verbose } => list_command(*verbose)?,
-        crate::Commands::Snap {
-            name,
-            scope,
-            settings_path,
-            description,
-            overwrite,
-        } => snap_command(name, scope, settings_path, description, *overwrite)?,
-        crate::Commands::Apply {
+        cli::Commands::List => {
+            list_command()?;
+        }
+        cli::Commands::Apply {
             target,
             scope,
             model,
@@ -31,56 +26,36 @@ pub fn run_command(args: &crate::Cli) -> Result<()> {
             backup,
             yes,
         } => apply_command(target, scope, model, settings_path, *backup, *yes)?,
-        crate::Commands::Delete { name, yes } => delete_command(name, *yes)?,
-        crate::Commands::Credentials(credential_commands) => match credential_commands {
-            crate::CredentialCommands::List => credentials_list_command()?,
-            crate::CredentialCommands::Delete { id } => credentials_delete_command(id)?,
-            crate::CredentialCommands::Clear { yes } => credentials_clear_command(*yes)?,
+        cli::Commands::Credentials { command } => match command {
+            cli::CredentialCommands::List => credentials_list_command()?,
+            cli::CredentialCommands::Clear { yes } => credentials_clear_command(*yes)?,
         },
     }
     Ok(())
 }
 
 /// List available snapshots
-pub fn list_command(verbose: bool) -> Result<()> {
-    let snapshots_dir = crate::utils::get_snapshots_dir();
-    let store = SnapshotStore::new(snapshots_dir);
-    let snapshots = store.list()?;
+pub fn list_command() -> Result<()> {
+    // Interactive snapshot browser
+    println!("📸 Snapshot Browser");
+    println!();
 
-    if snapshots.is_empty() {
-        println!("No snapshots found.");
-        return Ok(());
-    }
+    let mut selector = crate::selectors::snapshot::SnapshotSelector::new()?;
 
-    println!("Available snapshots ({} total):", snapshots.len());
-
-    for snapshot in &snapshots {
-        if verbose {
-            println!("\n{} {}", style("Name:").bold(), snapshot.name);
-            println!("{} {}", style("ID:").bold(), snapshot.id);
-            if let Some(ref desc) = snapshot.description {
-                println!("{} {}", style("Description:").bold(), desc);
-            }
-            println!("{} {}", style("Scope:").bold(), snapshot.scope);
-            println!("{} {}", style("Created:").bold(), snapshot.created_at);
-            println!("{} {}", style("Updated:").bold(), snapshot.updated_at);
-
-            let masked_settings = snapshot.settings.clone().mask_sensitive_data();
-            println!(
-                "{}\n{}",
-                style("Settings:").bold(),
-                format_settings_for_display(&masked_settings, true)
-            );
-        } else {
-            println!(
-                "{}: {} (scope: {}, created: {})",
-                style(&snapshot.name).cyan().bold(),
-                snapshot.id,
-                snapshot.scope,
-                snapshot.created_at
-            );
+    // Run the interactive selector
+    match selector.run_management() {
+        Ok(()) => {
+            println!("\n👋 Goodbye!");
         }
-        println!();
+        Err(e) => {
+            // Check if this is a selector cancellation error
+            let error_str = e.to_string();
+            if error_str.contains("User cancelled selection") {
+                println!("\n👋 Cancelled. See you next time!");
+            } else {
+                println!("\n❌ Error: {}", e);
+            }
+        }
     }
 
     Ok(())
@@ -117,7 +92,7 @@ pub fn snap_command(
         return Ok(());
     }
 
-    let snapshot = crate::Snapshot::new(
+    let snapshot = snapshots::Snapshot::new(
         name.to_string(),
         snapshot_settings,
         scope.clone(),
@@ -331,73 +306,28 @@ fn apply_snapshot_command(
     Ok(())
 }
 
-/// Delete a snapshot
-pub fn delete_command(name: &str, yes: bool) -> Result<()> {
-    let snapshots_dir = get_snapshots_dir();
-    let store = SnapshotStore::new(snapshots_dir);
-
-    if !store.exists_by_name(name) {
-        return Err(anyhow!("Snapshot '{}' not found", name));
-    }
-
-    if !yes && !confirm_action(&format!("Delete snapshot '{}'?", name), false)? {
-        return Ok(());
-    }
-
-    store.delete_by_name(name)?;
-    println!(
-        "{} Deleted snapshot '{}' successfully!",
-        style("✓").green().bold(),
-        name
-    );
-
-    Ok(())
-}
-
-/// List saved credentials
+/// List saved credentials interactively
 pub fn credentials_list_command() -> Result<()> {
-    let _credentials_dir = get_credentials_dir();
-    let credential_store = CredentialStore::new()?;
+    println!("🔐 Credential Browser");
+    println!();
 
-    let credentials = credential_store.load_credentials()?;
+    let mut selector = crate::selectors::credential::CredentialSelector::new_all()?;
 
-    if credentials.is_empty() {
-        println!("No saved credentials found.");
-        return Ok(());
+    // Run the interactive selector
+    match selector.run_management() {
+        Ok(()) => {
+            println!("\n👋 Goodbye!");
+        }
+        Err(e) => {
+            // Check if this is a selector cancellation error
+            let error_str = e.to_string();
+            if error_str.contains("User cancelled selection") {
+                println!("\n👋 Cancelled. See you next time!");
+            } else {
+                println!("\n❌ Error: {}", e);
+            }
+        }
     }
-
-    println!("Saved credentials ({} total):", credentials.len());
-
-    for credential in &credentials {
-        let template_type = credential.template_type();
-        let masked_key = mask_api_key(credential.api_key());
-
-        println!(
-            "{}: {} ({} - {})",
-            style(credential.id()).cyan().bold(),
-            credential.name(),
-            template_type,
-            masked_key
-        );
-    }
-
-    Ok(())
-}
-
-/// Delete a credential
-pub fn credentials_delete_command(id: &str) -> Result<()> {
-    let _credentials_dir = get_credentials_dir();
-    let credential_store = CredentialStore::new()?;
-
-    if credential_store.delete_credential(id).is_err() {
-        return Err(anyhow!("Credential '{}' not found", id));
-    }
-
-    println!(
-        "{} Deleted credential '{}' successfully!",
-        style("✓").green().bold(),
-        id
-    );
 
     Ok(())
 }
@@ -416,13 +346,4 @@ pub fn credentials_clear_command(yes: bool) -> Result<()> {
     println!("{} Cleared all credentials!", style("✓").green().bold());
 
     Ok(())
-}
-
-/// Helper function to mask API key for display
-fn mask_api_key(api_key: &str) -> String {
-    if api_key.len() <= 8 {
-        "••••••••".to_string()
-    } else {
-        format!("{}••••••••", &api_key[..api_key.len().min(8)])
-    }
 }

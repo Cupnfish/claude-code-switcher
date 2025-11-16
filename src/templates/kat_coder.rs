@@ -2,8 +2,8 @@
 
 use crate::{
     credentials::CredentialStore,
+    selectors::template::get_endpoint_id_interactively,
     settings::{ClaudeSettings, Permissions},
-    simple_selector::get_endpoint_id_interactively,
     snapshots::SnapshotScope,
     templates::Template,
 };
