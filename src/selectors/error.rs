@@ -53,6 +53,16 @@ impl From<std::io::Error> for SelectorError {
     }
 }
 
+impl From<inquire::InquireError> for SelectorError {
+    fn from(err: inquire::InquireError) -> Self {
+        if err.to_string().contains("canceled") || err.to_string().contains("cancelled") {
+            SelectorError::Cancelled
+        } else {
+            SelectorError::Failed(err.to_string())
+        }
+    }
+}
+
 impl SelectorError {
     /// Check if the error represents a user cancellation
     pub fn is_cancellation(&self) -> bool {

@@ -1,10 +1,11 @@
 //! Snapshot selector using the unified selector framework
 
 use crate::selectors::{
-    base::{SelectableItem, Selector},
+    base::{
+        BaseSelector, SelectableItem, SelectionResult, Selector, SelectorConfig, prompt_rename,
+    },
     confirmation::ConfirmationService,
     error::{SelectorError, SelectorResult},
-    navigation::NavigationManager,
 };
 use crate::{
     Configurable,
@@ -12,6 +13,31 @@ use crate::{
     snapshots::{Snapshot, SnapshotScope, SnapshotStore},
     utils::get_snapshots_dir,
 };
+use std::io::{self, Write};
+
+/// Simple text input function
+fn get_text_input(
+    prompt: &str,
+    default: Option<&str>,
+    _description: Option<&str>,
+) -> SelectorResult<String> {
+    print!("{}", prompt);
+    if let Some(default) = default {
+        print!(" [{}]", default);
+    }
+    print!(": ");
+    io::stdout().flush()?;
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+
+    let input = input.trim();
+    if input.is_empty() && default.is_some() {
+        Ok(default.unwrap().to_string())
+    } else {
+        Ok(input.to_string())
+    }
+}
 
 /// Action for snapshot management
 #[derive(Debug, Clone)]
@@ -19,6 +45,7 @@ pub enum SnapshotManagementAction {
     ViewDetails(usize),
     Apply(usize),
     Delete(usize),
+    Rename(usize),
     CreateSnapshot,
     Back,
     Exit,
@@ -28,6 +55,27 @@ pub enum SnapshotManagementAction {
 pub struct SnapshotSelector {
     snapshots: Vec<Snapshot>,
     store: SnapshotStore,
+}
+
+/// Display wrapper for snapshots
+#[derive(Clone, Debug)]
+struct SnapshotDisplayItem {
+    index: usize,
+    snapshot: Snapshot,
+}
+
+impl SelectableItem for SnapshotDisplayItem {
+    fn display_name(&self) -> String {
+        format!("{} ({})", self.snapshot.name, self.snapshot.scope)
+    }
+
+    fn format_for_list(&self) -> String {
+        self.display_name()
+    }
+
+    fn id(&self) -> Option<String> {
+        Some(self.snapshot.id.clone())
+    }
 }
 
 impl SnapshotSelector {
@@ -82,6 +130,13 @@ impl SnapshotSelector {
                         })?;
                     }
                 }
+                Some(SnapshotManagementAction::Rename(index)) => {
+                    if let Some(should_continue) = self.rename_snapshot(index)?
+                        && !should_continue
+                    {
+                        continue;
+                    }
+                }
                 Some(SnapshotManagementAction::Back) => continue,
                 Some(SnapshotManagementAction::Exit) => break,
                 None => break,
@@ -116,79 +171,246 @@ impl SnapshotSelector {
             .map_err(|e| SelectorError::Failed(format!("Snapshot selection failed: {}", e)))
     }
 
-    /// Select snapshot action
+    /// Select snapshot action using new selector framework
     fn select_snapshot_action(&mut self) -> SelectorResult<Option<SnapshotManagementAction>> {
-        // Use special handling for create option
-        let items: Vec<SnapshotListItem> = self
+        let snapshot_items: Vec<SnapshotDisplayItem> = self
             .snapshots
             .iter()
             .enumerate()
-            .map(|(index, snapshot)| SnapshotListItem {
-                index,
-                snapshot: snapshot.clone(),
-                is_create: false,
+            .map(|(i, s)| SnapshotDisplayItem {
+                index: i,
+                snapshot: s.clone(),
             })
             .collect();
 
         let title = format!(
             "Select a snapshot to manage ({} total):",
-            self.snapshots.len() + 1
+            self.snapshots.len()
         );
 
-        match NavigationManager::select_from_list_with_create(
-            &items,
-            &title,
-            true,
-            Some("↑/↓: Navigate, →: Select, ←/Esc: Back"),
-        )? {
-            crate::selectors::navigation::NavigationResult::Selected(item) => {
-                if item.is_create {
-                    Ok(Some(SnapshotManagementAction::CreateSnapshot))
-                } else {
-                    self.show_snapshot_actions(item.index).map(Some)
-                }
-            }
-            crate::selectors::navigation::NavigationResult::CreateNew => {
-                Ok(Some(SnapshotManagementAction::CreateSnapshot))
-            }
-            crate::selectors::navigation::NavigationResult::Back
-            | crate::selectors::navigation::NavigationResult::Exit => Ok(None),
+        let config = SelectorConfig {
+            allow_create: true,
+            show_filter: true,
+            ..SelectorConfig::default()
+        };
+
+        let mut selector = Selector::new(&title, snapshot_items).with_config(config);
+
+        match selector.prompt()? {
+            SelectionResult::Selected(item) => self.show_snapshot_actions(item.index).map(Some),
+            SelectionResult::Create => Ok(Some(SnapshotManagementAction::CreateSnapshot)),
+            SelectionResult::Back => Ok(None),
+            SelectionResult::Exit => std::process::exit(0),
+            _ => Ok(None),
         }
     }
 
-    /// Show actions for a snapshot
     fn show_snapshot_actions(&self, index: usize) -> SelectorResult<SnapshotManagementAction> {
+        use inquire::{InquireError, Select};
+
         let snapshot = &self.snapshots[index];
 
-        let actions = vec!["📋 View Details", "🔄 Apply", "🗑️  Delete", "⬅️  Back"];
+        // Create snapshot details string
+        let mut details = format!(
+            "Snapshot: {} ({})\n\
+             Scope: {}\n\
+             Created: {}\n\
+             Updated: {}",
+            snapshot.name, snapshot.scope, snapshot.scope, snapshot.created_at, snapshot.updated_at
+        );
 
-        let title = format!("Managing: {} ({})", snapshot.name, snapshot.scope);
+        // Add description if available
+        if let Some(description) = &snapshot.description
+            && !description.is_empty()
+        {
+            details.push_str(&format!("\nDescription: {}", description));
+        }
 
-        match NavigationManager::select_option(&title, &actions, None)? {
-            action if action == "📋 View Details" => {
-                Ok(SnapshotManagementAction::ViewDetails(index))
-            }
-            action if action == "🔄 Apply" => Ok(SnapshotManagementAction::Apply(index)),
-            action if action == "🗑️  Delete" => Ok(SnapshotManagementAction::Delete(index)),
-            action if action == "⬅️  Back" => Ok(SnapshotManagementAction::Back),
-            _ => Ok(SnapshotManagementAction::Exit),
+        // Create options for the select
+        let options = vec![
+            "📋 View Details",
+            "🔄 Apply",
+            "✏️  Rename",
+            "🗑️  Delete",
+            "⬅️  Back",
+        ];
+
+        let help_message = format!("{}\n\n↑↓ to move, enter to select, esc to cancel", details);
+
+        match Select::new("Manage Snapshot:", options)
+            .with_help_message(&help_message)
+            .with_page_size(5)
+            .prompt_skippable()
+        {
+            Ok(Some(action)) => match action {
+                "📋 View Details" => Ok(SnapshotManagementAction::ViewDetails(index)),
+                "🔄 Apply" => Ok(SnapshotManagementAction::Apply(index)),
+                "✏️  Rename" => Ok(SnapshotManagementAction::Rename(index)),
+                "🗑️  Delete" => Ok(SnapshotManagementAction::Delete(index)),
+                "⬅️  Back" => Ok(SnapshotManagementAction::Back),
+                _ => Ok(SnapshotManagementAction::Exit),
+            },
+            Ok(None) => Ok(SnapshotManagementAction::Exit),
+            Err(InquireError::OperationCanceled) => Ok(SnapshotManagementAction::Exit),
+            Err(e) => Err(SelectorError::failed(e.to_string())),
         }
     }
 
-    /// Show snapshot details with navigation
-    fn show_snapshot_details_with_navigation(&self, index: usize) -> SelectorResult<bool> {
+    /// Show snapshot details with navigation, including configuration and operations
+    fn show_snapshot_details_with_navigation(&mut self, index: usize) -> SelectorResult<bool> {
         if index >= self.snapshots.len() {
             return Err(SelectorError::NotFound);
         }
 
-        self.display_snapshot_info(index)?;
+        use crossterm::{
+            QueueableCommand,
+            cursor::{Hide, Show},
+            event::{Event, KeyCode, KeyEvent, read},
+            style::{Color, Print, ResetColor, SetForegroundColor},
+            terminal::{self, Clear, ClearType},
+        };
+        use std::io::{Write, stdout};
 
-        let actions = vec!["⬅️  Back to Snapshot List", "🚪 Exit Program"];
+        let snapshot = &self.snapshots[index];
+        let actions = vec!["🔄 Apply", "✏️  Rename", "🗑️  Delete", "⬅️  Back"];
 
-        match NavigationManager::select_option("Choose an action:", &actions, None)? {
-            action if action == "⬅️  Back to Snapshot List" => Ok(true),
-            action if action == "🚪 Exit Program" => Ok(false),
-            _ => Ok(true),
+        // Setup terminal
+        terminal::enable_raw_mode()?;
+        let mut stdout = stdout();
+
+        // Initialize selected_action outside the loop
+        let mut selected_action = 0;
+
+        loop {
+            // Clear screen and move cursor to top-left
+            stdout.queue(Clear(ClearType::All))?;
+            stdout.queue(crossterm::cursor::MoveTo(0, 0))?;
+
+            // Render header
+            stdout
+                .queue(SetForegroundColor(Color::Cyan))?
+                .queue(Print(format!(
+                    "? Managing: {} ({})\n\n",
+                    snapshot.name, snapshot.scope
+                )))?
+                .queue(ResetColor)?;
+
+            // Render detailed snapshot information
+            stdout.queue(SetForegroundColor(Color::White))?;
+
+            // Display basic snapshot details
+            self.display_snapshot_info(index)?;
+
+            // Display snapshot configuration
+            stdout.queue(Print("\n📝 Configuration:\n"))?;
+            stdout.queue(Print(&crate::settings::format_settings_for_display(
+                &snapshot.settings,
+                false,
+            )))?;
+
+            stdout.queue(Print("\n"))?;
+            stdout.queue(ResetColor)?;
+
+            // Render action list
+            for (i, action) in actions.iter().enumerate() {
+                if i == selected_action {
+                    stdout
+                        .queue(SetForegroundColor(Color::Yellow))?
+                        .queue(Print("❯ "))?
+                        .queue(Print(action))?
+                        .queue(ResetColor)?;
+                } else {
+                    stdout.queue(Print(format!("  {}", action)))?;
+                }
+                stdout.queue(Print("\n"))?;
+            }
+
+            // Render help
+            stdout.queue(Print("\n"))?;
+            stdout
+                .queue(SetForegroundColor(Color::DarkGrey))?
+                .queue(Print("↑/↓: Navigate, Enter: Select, Esc: Back"))?
+                .queue(ResetColor)?;
+
+            // Flush all queued commands
+            stdout.flush()?;
+            stdout.queue(Hide)?;
+            stdout.flush()?;
+
+            // Handle input
+            if let Event::Key(KeyEvent { code, .. }) = read()? {
+                match code {
+                    KeyCode::Up => {
+                        if selected_action > 0 {
+                            selected_action -= 1;
+                        }
+                    }
+                    KeyCode::Down => {
+                        if selected_action < actions.len() - 1 {
+                            selected_action += 1;
+                        }
+                    }
+                    KeyCode::Left => {
+                        // Left arrow acts as back
+                        stdout.queue(Show)?;
+                        stdout.flush()?;
+                        terminal::disable_raw_mode()?;
+                        return Ok(true);
+                    }
+                    KeyCode::Enter => {
+                        stdout.queue(Show)?;
+                        stdout.flush()?;
+                        terminal::disable_raw_mode()?;
+
+                        match actions[selected_action] {
+                            "🔄 Apply" => {
+                                // Apply the snapshot
+                                if let Err(e) = self.apply_snapshot(index) {
+                                    println!("❌ Failed to apply snapshot: {}", e);
+                                    println!("Press Enter to continue...");
+                                    let mut input = String::new();
+                                    std::io::stdin().read_line(&mut input)?;
+                                    return self.show_snapshot_details_with_navigation(index);
+                                }
+                                println!("✅ Snapshot applied successfully!");
+                                println!("Press Enter to continue...");
+                                let mut input = String::new();
+                                std::io::stdin().read_line(&mut input)?;
+                                return Ok(true);
+                            }
+                            "✏️  Rename" => {
+                                // Rename the snapshot
+                                if let Some(true) = self.rename_snapshot(index)? {
+                                    // Re-run to show updated name
+                                    terminal::enable_raw_mode()?;
+                                    return self.show_snapshot_details_with_navigation(index);
+                                }
+                                return Ok(true);
+                            }
+                            "🗑️  Delete" => {
+                                // Delete the snapshot
+                                if self.delete_snapshot(index)? {
+                                    return Ok(false); // Exit since snapshot was deleted
+                                }
+                                return Ok(true);
+                            }
+                            "⬅️  Back" => {
+                                return Ok(true);
+                            }
+                            _ => {
+                                return Ok(true);
+                            }
+                        }
+                    }
+                    KeyCode::Esc => {
+                        stdout.queue(Show)?;
+                        stdout.flush()?;
+                        terminal::disable_raw_mode()?;
+                        return Ok(true);
+                    }
+                    _ => {}
+                }
+            }
         }
     }
 
@@ -223,15 +445,16 @@ impl SnapshotSelector {
 
         // Step 1: Select configuration path
         let config_path_options = vec![
-            "Local (.claude/settings.json) - Project-specific settings",
-            "Global (~/.claude/settings.json) - User-wide settings",
+            "Local (.claude/settings.json) - Project-specific settings".to_string(),
+            "Global (~/.claude/settings.json) - User-wide settings".to_string(),
         ];
 
-        let config_selection = NavigationManager::select_option(
-            "Select configuration to snapshot:",
-            &config_path_options,
-            Some("Choose which settings file to create snapshot from"),
-        )?;
+        let mut selector =
+            BaseSelector::new(config_path_options, "Select configuration to snapshot:")
+                .with_show_filter(false);
+        let config_selection = selector.run()?.unwrap_or_else(|| {
+            "Local (.claude/settings.json) - Project-specific settings".to_string()
+        });
 
         let settings_path = if config_selection.starts_with("Local") {
             crate::utils::get_local_settings_path()
@@ -297,8 +520,8 @@ impl SnapshotSelector {
         println!(); // Add spacing
 
         // Step 3: Get snapshot name
-        let name = NavigationManager::get_text_input(
-            "Enter snapshot name:",
+        let name = get_text_input(
+            "Enter snapshot name",
             None,
             Some(
                 "A descriptive name for your snapshot (e.g., 'development-setup', 'production-config')",
@@ -311,8 +534,8 @@ impl SnapshotSelector {
         }
 
         // Get description (optional)
-        let description = NavigationManager::get_text_input(
-            "Enter description (optional):",
+        let description = get_text_input(
+            "Enter description (optional)",
             Some(""),
             Some("Optional description to help you remember what this snapshot is for"),
         )?;
@@ -325,16 +548,16 @@ impl SnapshotSelector {
 
         // Select scope
         let scope_options = vec![
-            "common - Common settings only (model, hooks, permissions)",
-            "env - Environment variables only",
-            "all - All settings (common + environment)",
+            "common - Common settings only (model, hooks, permissions)".to_string(),
+            "env - Environment variables only".to_string(),
+            "all - All settings (common + environment)".to_string(),
         ];
 
-        let scope_selection = NavigationManager::select_option(
-            "Select snapshot scope:",
-            &scope_options,
-            Some("Choose what to include in the snapshot"),
-        )?;
+        let mut selector =
+            BaseSelector::new(scope_options, "Select snapshot scope:").with_show_filter(false);
+        let scope_selection = selector.run()?.unwrap_or_else(|| {
+            "common - Common settings only (model, hooks, permissions)".to_string()
+        });
 
         let scope = match scope_selection.split_once(" - ") {
             Some((scope_name, _)) => scope_name
@@ -459,48 +682,48 @@ impl SnapshotSelector {
             Ok(false)
         }
     }
-}
 
-/// Wrapper for snapshots in selection lists
-#[derive(Debug, Clone)]
-struct SnapshotListItem {
-    index: usize,
-    snapshot: Snapshot,
-    is_create: bool,
-}
-
-impl SelectableItem for SnapshotListItem {
-    fn display_name(&self) -> String {
-        if self.is_create {
-            "➕ Create New Snapshot".to_string()
-        } else {
-            format!("{} ({})", self.snapshot.name, self.snapshot.scope)
+    /// Rename a snapshot with confirmation
+    fn rename_snapshot(&self, index: usize) -> SelectorResult<Option<bool>> {
+        if index >= self.snapshots.len() {
+            return Err(SelectorError::NotFound);
         }
-    }
 
-    fn format_for_list(&self) -> String {
-        if self.is_create {
-            "➕ Create New Snapshot".to_string()
+        let snapshot = &self.snapshots[index];
+        let new_name = prompt_rename(&snapshot.name, "snapshot")?;
+
+        if new_name != snapshot.name {
+            // Check if snapshot already exists with new name
+            if self.store.exists_by_name(&new_name) {
+                let overwrite_confirmation =
+                    ConfirmationService::confirm_overwrite(&new_name, "snapshot")?;
+                if !overwrite_confirmation {
+                    println!("Rename cancelled.");
+                    return Ok(Some(true)); // Continue with management
+                }
+            }
+
+            // Create new snapshot with updated name
+            let mut updated_snapshot = snapshot.clone();
+            updated_snapshot.name = new_name.clone();
+            updated_snapshot.updated_at = chrono::Utc::now().to_rfc3339();
+
+            // Save updated snapshot
+            self.store.save(&updated_snapshot).map_err(|e| {
+                SelectorError::OperationFailed(format!("Failed to rename snapshot: {}", e))
+            })?;
+
+            // Delete old snapshot
+            self.store.delete(&snapshot.id).map_err(|e| {
+                SelectorError::OperationFailed(format!("Failed to delete old snapshot: {}", e))
+            })?;
+
+            println!("✓ Snapshot renamed to '{}' successfully!", new_name);
         } else {
-            let description_part = if let Some(desc) = &self.snapshot.description {
-                format!(" - {}", desc)
-            } else {
-                String::new()
-            };
-
-            format!(
-                "{} (scope: {}, created: {}){}",
-                self.snapshot.name, self.snapshot.scope, self.snapshot.created_at, description_part
-            )
+            println!("Name unchanged.");
         }
-    }
 
-    fn id(&self) -> Option<String> {
-        if self.is_create {
-            Some("create".to_string())
-        } else {
-            Some(self.snapshot.id.clone())
-        }
+        Ok(Some(true)) // Continue with management
     }
 }
 
@@ -511,16 +734,18 @@ impl SelectableItem for Snapshot {
     }
 
     fn format_for_list(&self) -> String {
-        let description_part = if let Some(desc) = &self.description {
-            format!(" - {}", desc)
-        } else {
-            String::new()
-        };
+        // Show detailed information when displayed as a single item in list-like UI
+        let mut details = format!(
+            "Name: {}\nScope: {}\nCreated: {}\nUpdated: {}\n",
+            self.name, self.scope, self.created_at, self.updated_at
+        );
 
-        format!(
-            "{} (scope: {}, created: {}){}",
-            self.name, self.scope, self.created_at, description_part
-        )
+        // Add description if available
+        if let Some(desc) = &self.description {
+            details.push_str(&format!("Description: {}\n", desc));
+        }
+
+        details
     }
 
     fn id(&self) -> Option<String> {

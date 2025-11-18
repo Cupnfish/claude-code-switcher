@@ -7,19 +7,18 @@ use crate::{
 };
 use crate::{
     selectors::{
-        base::{SelectableItem, Selector},
+        base::SelectableItem,
         confirmation::ConfirmationService,
         error::{SelectorError, SelectorResult},
-        navigation::NavigationManager,
     },
     templates,
 };
-use std::io;
+use std::io::{self, Write};
+use uuid::Uuid;
 
 /// Action for credential management
 #[derive(Debug, Clone)]
 pub enum CredentialManagementAction {
-    ViewDetails(usize),
     Delete(usize),
     Rename(usize),
     Back,
@@ -70,12 +69,6 @@ impl CredentialSelector {
 
         loop {
             match self.select_credential_action()? {
-                Some(CredentialManagementAction::ViewDetails(index)) => {
-                    if !self.show_credential_details_with_navigation(index)? {
-                        break;
-                    }
-                    continue;
-                }
                 Some(CredentialManagementAction::Delete(index)) => {
                     if self.delete_credential(index)? && index < self.credentials.len() {
                         self.credentials.remove(index);
@@ -116,7 +109,9 @@ impl CredentialSelector {
             }
 
             let prompt_text = format!("Enter your {} API key:", template_type);
-            let api_key = NavigationManager::get_text_input(&prompt_text, Some("sk-..."), None)?;
+            let api_key = inquire::Text::new(&prompt_text)
+                .with_placeholder("sk-...")
+                .prompt()?;
 
             if !api_key.trim().is_empty() {
                 return Ok(Some(api_key));
@@ -142,8 +137,9 @@ impl CredentialSelector {
                 }
 
                 let prompt_text = format!("Enter your {} API key:", template_type);
-                let api_key =
-                    NavigationManager::get_text_input(&prompt_text, Some("sk-..."), None)?;
+                let api_key = inquire::Text::new(&prompt_text)
+                    .with_placeholder("sk-...")
+                    .prompt()?;
 
                 if !api_key.trim().is_empty() {
                     Ok(Some(api_key))
@@ -165,12 +161,16 @@ impl CredentialSelector {
             None => return Ok(None),
         };
 
+        // Clear screen before showing actions
+        print!("\x1b[2J\x1b[H"); // Clear screen and move cursor to top-left
+        std::io::stdout().flush()?;
+
         // Then show actions for that credential
         self.show_credential_actions(index).map(Some)
     }
 
     /// Select credential from list
-    fn select_credential_from_list(&self) -> SelectorResult<Option<usize>> {
+    fn select_credential_from_list(&mut self) -> SelectorResult<Option<usize>> {
         let items: Vec<CredentialListItem> = self
             .credentials
             .iter()
@@ -178,6 +178,7 @@ impl CredentialSelector {
             .map(|(index, cred)| CredentialListItem {
                 index,
                 credential: cred.clone(),
+                is_filter: false,
             })
             .collect();
 
@@ -186,93 +187,216 @@ impl CredentialSelector {
             self.credentials.len()
         );
 
-        match NavigationManager::select_from_list(
-            &items,
-            &title,
-            false,
-            Some("↑/↓: Navigate, →: Select, ←/Esc: Back"),
-        )? {
-            crate::selectors::navigation::NavigationResult::Selected(item) => Ok(Some(item.index)),
-            crate::selectors::navigation::NavigationResult::Back
-            | crate::selectors::navigation::NavigationResult::Exit => Ok(None),
-            _ => Ok(None),
+        let mut all_items = items.clone();
+
+        // Add filter option if there are enough items
+        if all_items.len() > 5 {
+            // Create a placeholder credential for the filter option
+            let placeholder_credential = if self.credentials.is_empty() {
+                // Create a minimal placeholder credential
+                SavedCredential {
+                    id: Uuid::new_v4().to_string(),
+                    name: "Filter".to_string(),
+                    api_key: "placeholder".to_string(),
+                    template_type: crate::templates::TemplateType::DeepSeek,
+                    version: "1".to_string(),
+                    created_at: chrono::Utc::now()
+                        .format("%Y-%m-%d %H:%M:%S UTC")
+                        .to_string(),
+                    updated_at: chrono::Utc::now()
+                        .format("%Y-%m-%d %H:%M:%S UTC")
+                        .to_string(),
+                    metadata: None,
+                }
+            } else {
+                self.credentials[0].clone()
+            };
+
+            all_items.insert(
+                0,
+                CredentialListItem {
+                    index: 0,
+                    credential: placeholder_credential,
+                    is_filter: true,
+                },
+            );
         }
-    }
 
-    /// Show actions for a credential
-    fn show_credential_actions(&self, index: usize) -> SelectorResult<CredentialManagementAction> {
-        let credential = &self.credentials[index];
+        // Create selector directly instead of using BaseSelector to handle actions ourselves
+        let config = crate::selectors::base::SelectorConfig::default();
+        let mut selector =
+            crate::selectors::base::Selector::new(&title, all_items).with_config(config);
 
-        let actions = vec!["📋 View Details", "✏️  Rename", "🗑️  Delete", "⬅️  Back"];
-
-        let title = format!(
-            "Managing: {} ({})",
-            credential.name(),
-            credential.template_type()
-        );
-
-        match NavigationManager::select_option(&title, &actions, None)? {
-            action if action == "📋 View Details" => {
-                Ok(CredentialManagementAction::ViewDetails(index))
+        match selector.prompt()? {
+            crate::selectors::base::SelectionResult::Selected(item) => {
+                if item.is_filter {
+                    return Self::filter_credentials(&self.credentials);
+                } else {
+                    Ok(Some(item.index))
+                }
             }
-            action if action == "✏️  Rename" => Ok(CredentialManagementAction::Rename(index)),
-            action if action == "🗑️  Delete" => Ok(CredentialManagementAction::Delete(index)),
-            action if action == "⬅️  Back" => Ok(CredentialManagementAction::Back),
-            _ => Ok(CredentialManagementAction::Exit),
+            crate::selectors::base::SelectionResult::Rename(item) => {
+                // Handle rename directly
+                match self.rename_credential(item.index)? {
+                    Some(true) | None => {
+                        // Re-run selector to update the list
+                        self.select_credential_from_list()
+                    }
+                    Some(false) => Ok(None),
+                }
+            }
+            crate::selectors::base::SelectionResult::Delete(item) => {
+                // Handle delete directly
+                if self.delete_credential(item.index)? {
+                    // Re-run selector to update the list
+                    self.select_credential_from_list()
+                } else {
+                    // User cancelled deletion
+                    Ok(None)
+                }
+            }
+            crate::selectors::base::SelectionResult::ViewDetails(item) => {
+                // Just return the selected index
+                Ok(Some(item.index))
+            }
+            crate::selectors::base::SelectionResult::Back
+            | crate::selectors::base::SelectionResult::Exit
+            | _ => Ok(None),
         }
     }
 
-    /// Show credential details with navigation
-    fn show_credential_details_with_navigation(&self, index: usize) -> SelectorResult<bool> {
-        if index >= self.credentials.len() {
-            return Err(SelectorError::NotFound);
-        }
+    /// Filter credentials using text input
+    fn filter_credentials(credentials: &[SavedCredential]) -> SelectorResult<Option<usize>> {
+        use std::sync::Arc;
 
-        self.display_credential_info(index)?;
+        let suggestions: Vec<String> = credentials.iter().map(|c| c.name().to_string()).collect();
 
-        let actions = vec!["⬅️  Back to Credential List", "🚪 Exit Program"];
+        let suggestions = Arc::new(suggestions);
 
-        match NavigationManager::select_option("Choose an action:", &actions, None)? {
-            action if action == "⬅️  Back to Credential List" => Ok(true),
-            action if action == "🚪 Exit Program" => Ok(false),
-            _ => Ok(true),
-        }
-    }
+        let mut prompt = inquire::Text::new("Filter credentials:");
 
-    /// Display credential information
-    fn display_credential_info(&self, index: usize) -> SelectorResult<()> {
-        let credential = &self.credentials[index];
-
-        println!("\n📋 Credential Details:");
-        println!("  Name: {}", credential.name());
-        println!("  Type: {}", credential.template_type());
-        println!("  Created: {}", credential.created_at());
-        println!("  Updated: {}", credential.updated_at());
-        println!(
-            "  API Key: {}••••",
-            &credential.api_key()[..credential.api_key().len().min(4)]
+        prompt = prompt.with_help_message(
+            "Type to filter credential names, Tab: Complete, Enter: Select, Esc: Cancel",
         );
 
-        // Show environment variables
-        let template = get_template_instance(credential.template_type());
-        let env_vars = template.env_var_names();
-        println!("  Environment Variables:");
-        for (i, env_var) in env_vars.iter().enumerate() {
-            let marker = if i == 0 { " (primary)" } else { "" };
-            println!("    - {}{}", env_var, marker);
+        prompt = prompt.with_autocomplete(move |input: &str| {
+            if input.is_empty() {
+                return Ok(suggestions.iter().cloned().collect());
+            }
+
+            Ok(suggestions
+                .iter()
+                .filter(|suggestion| suggestion.to_lowercase().contains(&input.to_lowercase()))
+                .cloned()
+                .collect())
+        });
+
+        prompt = prompt.with_validator(|input: &str| {
+            if input.trim().is_empty() {
+                Ok(inquire::validator::Validation::Invalid(
+                    "Please type to filter credentials".into(),
+                ))
+            } else {
+                Ok(inquire::validator::Validation::Valid)
+            }
+        });
+
+        let user_input = prompt.prompt().map_err(|e| {
+            if e.to_string().contains("canceled") || e.to_string().contains("cancelled") {
+                SelectorError::Cancelled
+            } else {
+                SelectorError::Failed(format!("Filter input failed: {}", e))
+            }
+        })?;
+
+        // Find matching credential
+        for (index, credential) in credentials.iter().enumerate() {
+            if credential
+                .name()
+                .to_lowercase()
+                .contains(&user_input.to_lowercase())
+            {
+                return Ok(Some(index));
+            }
         }
 
-        // Show metadata if available
+        Err(SelectorError::InvalidInput(format!(
+            "No credential found matching: {}",
+            user_input
+        )))
+    }
+
+    /// Show actions for a credential using inquire Select component
+    fn show_credential_actions(&self, index: usize) -> SelectorResult<CredentialManagementAction> {
+        use inquire::{InquireError, Select};
+
+        let credential = &self.credentials[index];
+
+        // Create credential details string
+        let masked_key = if credential.api_key().len() <= 4 {
+            "••••".to_string()
+        } else {
+            format!(
+                "{}••••",
+                &credential.api_key()[..credential.api_key().len().min(4)]
+            )
+        };
+
+        let mut details = format!(
+            "Credential: {} ({})\n\
+             API Key: {}\n\
+             Env: {} (primary)",
+            credential.name(),
+            credential.template_type(),
+            masked_key,
+            crate::templates::get_template_instance(credential.template_type())
+                .env_var_names()
+                .first()
+                .unwrap_or(&"N/A")
+        );
+
+        // Add metadata if available
         if let Some(metadata) = credential.metadata()
             && !metadata.is_empty()
         {
-            println!("  Metadata:");
-            for (key, value) in metadata {
-                println!("    {}: {}", key, value);
+            let first_meta = metadata
+                .iter()
+                .take(2)
+                .map(|(k, v)| format!("{}: {}", k, v))
+                .collect::<Vec<_>>()
+                .join(", ");
+            if !first_meta.is_empty() {
+                details.push_str(&format!("\nMetadata: {}", first_meta));
             }
         }
 
-        Ok(())
+        // Create options for the select
+        let options = vec!["✏️  Rename", "🗑️  Delete", "⬅️  Back"];
+
+        let help_message = "↑↓ to move, enter to select, esc to cancel";
+
+        let full_details = format!(
+            "Manage Credential:\n\n{}\n\nCreated: {}\nUpdated: {}",
+            details,
+            credential.created_at(),
+            credential.updated_at()
+        );
+
+        match Select::new(&full_details, options)
+            .with_help_message(help_message)
+            .with_page_size(3)
+            .prompt_skippable()
+        {
+            Ok(Some(action)) => match action {
+                "✏️  Rename" => Ok(CredentialManagementAction::Rename(index)),
+                "🗑️  Delete" => Ok(CredentialManagementAction::Delete(index)),
+                "⬅️  Back" => Ok(CredentialManagementAction::Back),
+                _ => Ok(CredentialManagementAction::Exit),
+            },
+            Ok(None) => Ok(CredentialManagementAction::Exit),
+            Err(InquireError::OperationCanceled) => Ok(CredentialManagementAction::Exit),
+            Err(e) => Err(SelectorError::failed(e.to_string())),
+        }
     }
 
     /// Delete a credential with confirmation
@@ -370,45 +494,58 @@ impl CredentialSelector {
 struct CredentialListItem {
     index: usize,
     credential: SavedCredential,
+    is_filter: bool,
 }
 
 impl SelectableItem for CredentialListItem {
     fn display_name(&self) -> String {
-        format!(
-            "{} ({})",
-            self.credential.name(),
-            self.credential.template_type()
-        )
+        if self.is_filter {
+            "🔍 Filter credentials...".to_string()
+        } else {
+            format!(
+                "{} ({})",
+                self.credential.name(),
+                self.credential.template_type()
+            )
+        }
     }
 
     fn format_for_list(&self) -> String {
-        let masked_key = if self.credential.api_key().len() <= 8 {
-            "••••••••".to_string()
+        if self.is_filter {
+            "🔍 Filter credentials...".to_string()
         } else {
+            let masked_key = if self.credential.api_key().len() <= 8 {
+                "••••••••".to_string()
+            } else {
+                format!(
+                    "{}••••••••",
+                    &self.credential.api_key()[..self.credential.api_key().len().min(8)]
+                )
+            };
+
+            let env_vars = get_template_instance(self.credential.template_type()).env_var_names();
+            let env_indicator = if env_vars.len() > 1 {
+                format!(" (+{})", env_vars.len())
+            } else {
+                String::new()
+            };
+
             format!(
-                "{}••••••••",
-                &self.credential.api_key()[..self.credential.api_key().len().min(8)]
+                "{} ({}){} - {}",
+                self.credential.name(),
+                self.credential.template_type(),
+                env_indicator,
+                masked_key
             )
-        };
-
-        let env_vars = get_template_instance(self.credential.template_type()).env_var_names();
-        let env_indicator = if env_vars.len() > 1 {
-            format!(" (+{})", env_vars.len())
-        } else {
-            String::new()
-        };
-
-        format!(
-            "{} ({}){} - {}",
-            self.credential.name(),
-            self.credential.template_type(),
-            env_indicator,
-            masked_key
-        )
+        }
     }
 
     fn id(&self) -> Option<String> {
-        Some(self.credential.id().to_string())
+        if self.is_filter {
+            Some("filter".to_string())
+        } else {
+            Some(self.credential.id().to_string())
+        }
     }
 }
 
@@ -419,17 +556,48 @@ impl SelectableItem for SavedCredential {
     }
 
     fn format_for_list(&self) -> String {
+        // Show detailed information when displayed as a single item in list-like UI
         let masked_key = if self.api_key().len() <= 8 {
             "••••••••".to_string()
         } else {
             format!("{}••••••••", &self.api_key()[..self.api_key().len().min(8)])
         };
-        format!(
-            "{} ({}) - {}",
+
+        let template = get_template_instance(self.template_type());
+        let env_vars = template.env_var_names();
+
+        let mut details = format!(
+            "Name: {}\nType: {}\nAPI Key: {}\n",
             self.name(),
             self.template_type(),
             masked_key
-        )
+        );
+
+        // Add environment variables
+        details.push_str("Environment Variables:\n");
+        for (i, env_var) in env_vars.iter().enumerate() {
+            let marker = if i == 0 { " (primary)" } else { "" };
+            details.push_str(&format!("  - {}{}\n", env_var, marker));
+        }
+
+        // Add created and updated timestamps
+        details.push_str(&format!(
+            "Created: {}\nUpdated: {}\n",
+            self.created_at(),
+            self.updated_at()
+        ));
+
+        // Add metadata if available
+        if let Some(metadata) = self.metadata()
+            && !metadata.is_empty()
+        {
+            details.push_str("Metadata:\n");
+            for (key, value) in metadata {
+                details.push_str(&format!("  {}: {}\n", key, value));
+            }
+        }
+
+        details
     }
 
     fn id(&self) -> Option<String> {
