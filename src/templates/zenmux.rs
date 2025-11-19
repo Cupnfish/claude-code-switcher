@@ -1,4 +1,4 @@
-//! MiniMax AI provider template implementation
+//! Zenmux AI provider template implementation
 
 use crate::{
     settings::{ClaudeSettings, Permissions},
@@ -7,37 +7,50 @@ use crate::{
 };
 use std::collections::HashMap;
 
-/// MiniMax AI provider template
+/// Zenmux AI provider template
 #[derive(Debug, Clone)]
-pub struct MiniMaxTemplate;
+pub struct ZenmuxTemplate;
 
-impl Template for MiniMaxTemplate {
+impl ZenmuxTemplate {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for ZenmuxTemplate {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Template for ZenmuxTemplate {
     fn template_type(&self) -> crate::templates::TemplateType {
-        crate::templates::TemplateType::MiniMax
+        crate::templates::TemplateType::Zenmux
     }
 
     fn env_var_names(&self) -> Vec<&'static str> {
-        vec![
-            "MINIMAX_API_KEY",
-            "MINIMAX_TOKEN",
-            "MINIMAX_AUTH_TOKEN",
-        ]
+        vec!["ZENMUX_API_KEY", "ZENMUX_AUTH_TOKEN"]
     }
 
     fn display_name(&self) -> &'static str {
-        "MiniMax"
+        "Zenmux"
     }
 
     fn description(&self) -> &'static str {
-        "MiniMax API (recommended) - High-performance AI with Anthropic compatibility"
+        "Zenmux AI - Anthropic-compatible API with multiple model support including Claude and Gemini"
+    }
+
+    fn api_key_url(&self) -> Option<&'static str> {
+        Some("https://zenmux.ai/settings/keys")
     }
 
     fn create_settings(&self, api_key: &str, scope: &SnapshotScope) -> ClaudeSettings {
         let mut settings = ClaudeSettings::new();
 
         if matches!(scope, SnapshotScope::Common | SnapshotScope::All) {
-            settings.model = Some("MiniMax-M2".to_string());
+            settings.model = Some("google/gemini-3-pro-preview-free".to_string());
 
+            // Use the new permissions format
             settings.permissions = Some(Permissions {
                 allow: Some(vec![
                     "Bash".to_string(),
@@ -62,25 +75,22 @@ impl Template for MiniMaxTemplate {
             SnapshotScope::Env | SnapshotScope::Common | SnapshotScope::All
         ) {
             let mut env = HashMap::new();
-            env.insert("ANTHROPIC_API_KEY".to_string(), api_key.to_string());
             env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.to_string());
             env.insert(
                 "ANTHROPIC_BASE_URL".to_string(),
-                "https://api.minimax.io/anthropic".to_string(),
-            );
-            env.insert("ANTHROPIC_MODEL".to_string(), "MiniMax-M2".to_string());
-            env.insert(
-                "ANTHROPIC_SMALL_FAST_MODEL".to_string(),
-                "MiniMax-M2".to_string(),
+                "https://zenmux.ai/api/anthropic".to_string(),
             );
             env.insert(
-                "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
-                "MiniMax-M2".to_string(),
+                "ANTHROPIC_MODEL".to_string(),
+                "google/gemini-3-pro-preview-free".to_string(),
             );
-            env.insert("API_TIMEOUT_MS".to_string(), "600000".to_string());
             env.insert(
                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),
                 "1".to_string(),
+            );
+            env.insert(
+                "ANTHROPIC_SMALL_FAST_MODEL".to_string(),
+                "google/gemini-3-pro-preview-free".to_string(),
             );
             settings.env = Some(env);
         }
@@ -89,8 +99,8 @@ impl Template for MiniMaxTemplate {
     }
 }
 
-/// Create MiniMax template settings (legacy compatibility function)
-pub fn create_minimax_template(api_key: &str, scope: &SnapshotScope) -> ClaudeSettings {
-    let template = MiniMaxTemplate;
+/// Create Zenmux template settings (legacy compatibility function)
+pub fn create_zenmux_template(api_key: &str, scope: &SnapshotScope) -> ClaudeSettings {
+    let template = ZenmuxTemplate;
     template.create_settings(api_key, scope)
 }

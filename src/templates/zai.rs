@@ -90,8 +90,13 @@ impl Template for ZaiTemplate {
         crate::templates::TemplateType::Zai
     }
 
-    fn env_var_name(&self) -> &'static str {
-        "Z_AI_API_KEY"
+    fn env_var_names(&self) -> Vec<&'static str> {
+        vec![
+            "Z_AI_API_KEY",
+            "ZAI_API_KEY",
+            "GLM_API_KEY",
+            "ZHIPU_API_KEY",
+        ]
     }
 
     fn display_name(&self) -> &'static str {

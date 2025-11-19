@@ -194,46 +194,13 @@ impl ClaudeSettings {
     /// Capture environment variables for a specific template type
     pub fn capture_template_environment(template_type: &TemplateType) -> HashMap<String, String> {
         let mut env = HashMap::new();
-
-        match template_type {
-            TemplateType::DeepSeek => {
-                if let Ok(value) = std::env::var("DEEPSEEK_API_KEY") {
-                    env.insert("DEEPSEEK_API_KEY".to_string(), value);
-                }
-            }
-            TemplateType::Zai => {
-                if let Ok(value) = std::env::var("Z_AI_API_KEY") {
-                    env.insert("Z_AI_API_KEY".to_string(), value);
-                }
-            }
-            TemplateType::KatCoder => {
-                if let Ok(value) = std::env::var("KIMI_API_KEY") {
-                    env.insert("WQ_API_KEY".to_string(), value);
-                }
-            }
-            TemplateType::Kimi => {
-                // For unified Kimi template, try all possible environment variables
-                if let Ok(value) = std::env::var("MOONSHOT_API_KEY") {
-                    env.insert("MOONSHOT_API_KEY".to_string(), value);
-                }
-                if let Ok(value) = std::env::var("KIMI_API_KEY") {
-                    env.insert("KIMI_API_KEY".to_string(), value);
-                }
-            }
-            TemplateType::Longcat => {
-                if let Ok(value) = std::env::var("LONGCAT_API_KEY") {
-                    env.insert("LONGCAT_API_KEY".to_string(), value);
-                }
-            }
-            TemplateType::MiniMax => {
-                if let Ok(value) = std::env::var("MINIMAX_API_KEY") {
-                    env.insert("MINIMAX_API_KEY".to_string(), value);
-                }
-            }
-            TemplateType::SeedCode => {
-                if let Ok(value) = std::env::var("ARK_API_KEY") {
-                    env.insert("ARK_API_KEY".to_string(), value);
-                }
+        
+        // Use the template's env_var_names method to get all supported env vars
+        let env_var_names = crate::templates::get_env_var_names(template_type);
+        
+        for env_var_name in env_var_names {
+            if let Ok(value) = std::env::var(env_var_name) {
+                env.insert(env_var_name.to_string(), value);
             }
         }
 

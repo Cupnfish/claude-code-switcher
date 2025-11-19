@@ -8,7 +8,7 @@ use crate::{
         backup_settings, confirm_action, get_credentials_dir, get_settings_path, get_snapshots_dir,
     },
 };
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use console::style;
 use std::path::PathBuf;
 
@@ -177,27 +177,59 @@ fn apply_template_command(
         initial_template
     };
 
-    // Get API key - use the template instance's env var name for accuracy
+    // Get API key using the new multi-env-var support
     let api_key = {
-        let env_var_name = template_instance.env_var_name();
-        if let Ok(api_key) = std::env::var(env_var_name)
-            && !api_key.trim().is_empty()
-        {
-            println!("✓ Using API key from environment variable {}", env_var_name);
-            api_key
+        let env_var_names = template_instance.env_var_names();
+        let mut env_vars_with_keys = Vec::new();
+
+        // Check each environment variable name in order
+        for env_var_name in &env_var_names {
+            if let Some(api_key) = std::env::var(env_var_name)
+                .ok()
+                .filter(|key| !key.trim().is_empty())
+            {
+                env_vars_with_keys.push((env_var_name, api_key));
+            }
+        }
+
+        // Let user choose between env var and custom API key if env var exists
+        if !env_vars_with_keys.is_empty() {
+            use inquire::Select;
+
+            let mut options = Vec::new();
+            for (env_var_name, _) in &env_vars_with_keys {
+                options.push(format!("Use API key from environment variable {}", env_var_name));
+            }
+            options.push("Enter a custom API key".to_string());
+
+            let choice = Select::new("API key source:", options)
+                .prompt()
+                .map_err(|e| anyhow!("Failed to get API key source selection: {}", e))?;
+
+            // Find which env var was selected
+            let mut selected_api_key: Option<String> = None;
+            for (env_var_name, api_key) in &env_vars_with_keys {
+                if choice.contains(&format!("Use API key from environment variable {}", env_var_name)) {
+                    println!("✓ Using API key from environment variable {}", env_var_name);
+                    selected_api_key = Some(api_key.clone());
+                    break;
+                }
+            }
+
+            // Return the selected API key or get custom one
+            if let Some(api_key) = selected_api_key {
+                api_key
+            } else {
+                get_api_key_interactively(template_type.clone())?
+            }
         } else {
-            // Fallback to general API key selection
+            // No env vars found, use interactive credential selector
             get_api_key_interactively(template_type.clone())?
         }
     };
 
     let mut settings = template_instance.create_settings(&api_key, scope);
-    // Debug: Print settings before applying
-    println!(
-        "{}",
-        style("DEBUG: Settings to be applied:").yellow().bold()
-    );
-    println!("{}", format_settings_for_display(&settings, true));
+
     // Override model if specified
     if let Some(model_name) = model {
         settings.model = Some(model_name.clone());

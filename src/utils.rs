@@ -31,7 +31,7 @@ pub fn get_credentials_dir() -> PathBuf {
 
 /// Confirm an action with the user using enhanced selector
 pub fn confirm_action(message: &str, default: bool) -> Result<bool> {
-    crate::selectors::confirmation::ConfirmationService::confirm_with_default(message, default)
+    crate::selectors::confirmation::ConfirmationService::confirm_enhanced(message, default)
         .map_err(|e| anyhow::anyhow!("Confirmation failed: {}", e))
 }
 

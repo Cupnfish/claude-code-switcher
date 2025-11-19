@@ -71,8 +71,8 @@ impl Template for KatCoderTemplate {
         crate::templates::TemplateType::KatCoder
     }
 
-    fn env_var_name(&self) -> &'static str {
-        "KAT_CODER_API_KEY"
+    fn env_var_names(&self) -> Vec<&'static str> {
+        vec!["KAT_CODER_API_KEY", "KAT_API_KEY", "WQ_API_KEY"]
     }
 
     fn display_name(&self) -> &'static str {

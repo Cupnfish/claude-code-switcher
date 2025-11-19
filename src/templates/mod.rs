@@ -14,13 +14,8 @@ pub trait Template {
     /// Get the template type identifier
     fn template_type(&self) -> TemplateType;
 
-    /// Get the environment variable name for the API key (primary)
-    fn env_var_name(&self) -> &'static str;
-
     /// Get all supported environment variable names for this provider
-    fn env_var_names(&self) -> Vec<&'static str> {
-        vec![self.env_var_name()]
-    }
+    fn env_var_names(&self) -> Vec<&'static str>;
 
     /// Create Claude settings for this template
     fn create_settings(&self, api_key: &str, scope: &SnapshotScope) -> ClaudeSettings;
@@ -80,6 +75,7 @@ pub enum TemplateType {
     Longcat,
     MiniMax,
     SeedCode,
+    Zenmux,
 }
 
 impl<'de> Deserialize<'de> for TemplateType {
@@ -100,6 +96,7 @@ impl<'de> Deserialize<'de> for TemplateType {
             "Longcat" => Ok(TemplateType::Longcat),
             "MiniMax" => Ok(TemplateType::MiniMax),
             "SeedCode" => Ok(TemplateType::SeedCode),
+            "Zenmux" => Ok(TemplateType::Zenmux),
             _ => Err(serde::de::Error::custom(format!(
                 "unknown template type: {}",
                 s
@@ -127,8 +124,9 @@ impl std::str::FromStr for TemplateType {
             "longcat" => Ok(TemplateType::Longcat),
             "minimax" | "minimax-anthropic" => Ok(TemplateType::MiniMax),
             "seed-code" | "seedcode" | "seed_code" => Ok(TemplateType::SeedCode),
+            "zenmux" => Ok(TemplateType::Zenmux),
             _ => Err(anyhow!(
-                "Unknown template: {}. Available templates: deepseek, glm, k2, k2-thinking, kat-coder, kimi, longcat, minimax, seed-code",
+                "Unknown template: {}. Available templates: deepseek, glm, k2, k2-thinking, kat-coder, kimi, longcat, minimax, seed-code, zenmux",
                 s
             )),
         }
@@ -145,6 +143,7 @@ impl std::fmt::Display for TemplateType {
             TemplateType::Longcat => write!(f, "longcat"),
             TemplateType::MiniMax => write!(f, "minimax"),
             TemplateType::SeedCode => write!(f, "seed-code"),
+            TemplateType::Zenmux => write!(f, "zenmux"),
         }
     }
 }
@@ -164,24 +163,11 @@ pub fn get_all_templates() -> Vec<TemplateType> {
         TemplateType::Longcat,
         TemplateType::MiniMax,
         TemplateType::SeedCode,
+        TemplateType::Zenmux,
     ]
 }
 
 /// Get the environment variable name for a template type
-/// Note: For Kimi template, this returns a default. The actual template instance
-/// will determine the correct env var based on the specific variant.
-pub fn get_env_var_name(template_type: &TemplateType) -> &'static str {
-    match template_type {
-        TemplateType::DeepSeek => "DEEPSEEK_API_KEY",
-        TemplateType::Zai => "Z_AI_API_KEY",
-        TemplateType::KatCoder => "KAT_CODER_API_KEY",
-        TemplateType::Kimi => "MOONSHOT_API_KEY", // Default for K2 variants
-        TemplateType::Longcat => "LONGCAT_API_KEY",
-        TemplateType::MiniMax => "MINIMAX_API_KEY",
-        TemplateType::SeedCode => "ARK_API_KEY",
-    }
-}
-
 /// Get all supported environment variable names for a template type
 pub fn get_env_var_names(template_type: &TemplateType) -> Vec<&'static str> {
     let template_instance = get_template_instance(template_type);
@@ -227,6 +213,7 @@ pub fn get_template_instance_with_input(
         TemplateType::Longcat => Box::new(longcat::LongcatTemplate),
         TemplateType::MiniMax => Box::new(minimax::MiniMaxTemplate),
         TemplateType::SeedCode => Box::new(seed_code::SeedCodeTemplate),
+        TemplateType::Zenmux => Box::new(zenmux::ZenmuxTemplate),
     }
 }
 
@@ -245,6 +232,7 @@ pub fn get_template(template_type: &TemplateType) -> fn(&str, &SnapshotScope) ->
         TemplateType::Longcat => create_longcat_template,
         TemplateType::MiniMax => create_minimax_template,
         TemplateType::SeedCode => create_seed_code_template,
+        TemplateType::Zenmux => create_zenmux_template,
     }
 }
 
@@ -256,6 +244,7 @@ pub mod longcat;
 pub mod minimax;
 pub mod seed_code;
 pub mod zai;
+pub mod zenmux;
 
 // Re-export for backward compatibility
 pub use deepseek::*;
@@ -265,3 +254,4 @@ pub use longcat::*;
 pub use minimax::*;
 pub use seed_code::*;
 pub use zai::*;
+pub use zenmux::*;

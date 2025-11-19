@@ -520,12 +520,40 @@ pub fn prompt_save_credential(
 /// Get API key interactively using simple selector
 pub fn get_api_key_interactively(template_type: TemplateType) -> Result<String> {
     // First, try to get API key from environment variables
-    let env_var_name = crate::templates::get_env_var_name(&template_type);
-    if let Ok(api_key) = std::env::var(env_var_name)
-        && !api_key.trim().is_empty()
-    {
-        println!("✓ Using API key from environment variable {}", env_var_name);
-        return Ok(api_key);
+    let env_var_names = crate::templates::get_env_var_names(&template_type);
+    let mut env_vars_with_keys = Vec::new();
+
+    // Check each environment variable name in order
+    for env_var_name in &env_var_names {
+        if let Some(api_key) = std::env::var(env_var_name)
+            .ok()
+            .filter(|key| !key.trim().is_empty())
+        {
+            env_vars_with_keys.push((env_var_name, api_key));
+        }
+    }
+
+    // Let user choose between env var and custom API key if env var exists
+    if !env_vars_with_keys.is_empty() {
+        use inquire::Select;
+
+        let mut options = Vec::new();
+        for (env_var_name, _) in &env_vars_with_keys {
+            options.push(format!("Use API key from environment variable {}", env_var_name));
+        }
+        options.push("Enter a custom API key".to_string());
+
+        let choice = Select::new("API key source:", options)
+            .prompt()
+            .map_err(|e| anyhow!("Failed to get API key source selection: {}", e))?;
+
+        // Find which env var was selected
+        for (env_var_name, api_key) in &env_vars_with_keys {
+            if choice.contains(&format!("Use API key from environment variable {}", env_var_name)) {
+                println!("✓ Using API key from environment variable {}", env_var_name);
+                return Ok(api_key.clone());
+            }
+        }
     }
 
     // Get saved credentials

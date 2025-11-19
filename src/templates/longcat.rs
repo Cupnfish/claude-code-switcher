@@ -16,8 +16,12 @@ impl Template for LongcatTemplate {
         crate::templates::TemplateType::Longcat
     }
 
-    fn env_var_name(&self) -> &'static str {
-        "LONGCAT_API_KEY"
+    fn env_var_names(&self) -> Vec<&'static str> {
+        vec![
+            "LONGCAT_API_KEY",
+            "LONGCAT_TOKEN",
+            "LONGCAT_AUTH_TOKEN",
+        ]
     }
 
     fn display_name(&self) -> &'static str {

@@ -857,24 +857,12 @@ impl<T: SelectableItem + Clone> BaseSelector<T> {
         }
 
         match selector.prompt()? {
-            SelectionResult::Selected(item) => Ok(Some(item)),
+            SelectionResult::Selected(item) | SelectionResult::ViewDetails(item) => Ok(Some(item)),
             SelectionResult::Create => self.handle_create(),
             SelectionResult::CustomInput(input) => self.handle_custom_input(input),
             SelectionResult::Delete(item) => self.handle_delete(item),
             SelectionResult::Rename(item) => self.handle_rename(item),
             SelectionResult::Refresh => self.handle_refresh(),
-            SelectionResult::ViewDetails(item) => {
-                // Save current cursor position before entering details view
-                self.saved_state = Some(selector.get_state());
-
-                match Self::show_item_details(&item, "Item Details")? {
-                    SelectionResult::Selected(selected_item) => Ok(Some(selected_item)),
-                    SelectionResult::Back => self.run(), // Return with saved state restored
-                    SelectionResult::Delete(delete_item) => self.handle_delete(delete_item),
-                    SelectionResult::Rename(rename_item) => self.handle_rename(rename_item),
-                    _ => self.run(), // Return to main list for other cases
-                }
-            }
             SelectionResult::Back => {
                 // Clear saved state when going back from main menu
                 self.saved_state = None;
@@ -964,88 +952,86 @@ pub fn prompt_rename(
     let _ = terminal::enable_raw_mode();
     let mut stdout = stdout();
 
+    // Clear screen and show prompt
+    stdout.queue(Clear(ClearType::All))?;
+    stdout.queue(MoveTo(0, 0))?;
+
+    stdout
+        .execute(SetForegroundColor(Color::Cyan))?
+        .execute(Print(format!("✏️  Rename {}:", item_type)))?
+        .execute(ResetColor)?
+        .execute(Print(format!("  Current: {}", current_name)))?;
+
+    let mut input_state = InputState::from_content(current_name.to_string());
+    let cursor_pos = "  New name: ".to_string();
+
+    stdout.execute(Print(&cursor_pos))?;
+
+    // Main input loop
     loop {
-        // Clear screen and show prompt
-        stdout.queue(Clear(ClearType::All))?;
-        stdout.queue(MoveTo(0, 0))?;
-
-        stdout
-            .execute(SetForegroundColor(Color::Cyan))?
-            .execute(Print(format!("✏️  Rename {}:", item_type)))?
-            .execute(ResetColor)?
-            .execute(Print(format!("  Current: {}", current_name)))?;
-
-        let mut input_state = InputState::from_content(current_name.to_string());
-        let cursor_pos = format!("  New name: ");
-
-        stdout.execute(Print(&cursor_pos))?;
-
-        // Main input loop
-        loop {
-            if let Event::Key(key_event) = read()? {
-                match key_event.code {
-                    KeyCode::Enter => {
-                        let new_name = input_state.content().trim();
-                        if new_name.is_empty() {
-                            // Show error
-                            stdout.queue(MoveTo(0, 3))?;
-                            stdout
-                                .execute(SetForegroundColor(Color::Red))?
-                                .execute(Print("❌ Name cannot be empty"))?
-                                .execute(ResetColor)?;
-                            continue;
-                        }
-                        if new_name == current_name {
-                            // Show unchanged message
-                            stdout.queue(MoveTo(0, 3))?;
-                            stdout
-                                .execute(SetForegroundColor(Color::Yellow))?
-                                .execute(Print("ℹ️  Name unchanged"))?
-                                .execute(ResetColor)?;
-                            std::thread::sleep(std::time::Duration::from_millis(1000));
-                            return Ok(new_name.to_string());
-                        }
+        if let Event::Key(key_event) = read()? {
+            match key_event.code {
+                KeyCode::Enter => {
+                    let new_name = input_state.content().trim();
+                    if new_name.is_empty() {
+                        // Show error
+                        stdout.queue(MoveTo(0, 3))?;
+                        stdout
+                            .execute(SetForegroundColor(Color::Red))?
+                            .execute(Print("❌ Name cannot be empty"))?
+                            .execute(ResetColor)?;
+                        continue;
+                    }
+                    if new_name == current_name {
+                        // Show unchanged message
+                        stdout.queue(MoveTo(0, 3))?;
+                        stdout
+                            .execute(SetForegroundColor(Color::Yellow))?
+                            .execute(Print("ℹ️  Name unchanged"))?
+                            .execute(ResetColor)?;
+                        std::thread::sleep(std::time::Duration::from_millis(1000));
                         return Ok(new_name.to_string());
                     }
-                    KeyCode::Esc => {
-                        stdout.execute(Clear(ClearType::All))?;
-                        return Err(SelectorError::Cancelled);
-                    }
-                    KeyCode::Char(c) => {
-                        input_state.insert_char(c);
-                        // Redraw the input
-                        stdout.queue(MoveTo(cursor_pos.len() as u16, 1))?;
-                        stdout.queue(Clear(ClearType::UntilNewLine))?;
-                        stdout.queue(Print(&input_state.content()))?;
-                    }
-                    KeyCode::Backspace => {
-                        input_state.backspace();
-                        // Redraw the input
-                        stdout.queue(MoveTo(cursor_pos.len() as u16, 1))?;
-                        stdout.queue(Clear(ClearType::UntilNewLine))?;
-                        stdout.queue(Print(&input_state.content()))?;
-                    }
-                    KeyCode::Delete => {
-                        input_state.delete_char();
-                        // Redraw the input
-                        stdout.queue(MoveTo(cursor_pos.len() as u16, 1))?;
-                        stdout.queue(Clear(ClearType::UntilNewLine))?;
-                        stdout.queue(Print(&input_state.content()))?;
-                    }
-                    KeyCode::Left => {
-                        input_state.move_cursor_left();
-                        let cursor_col = cursor_pos.len() + input_state.pre_cursor_width();
-                        stdout.queue(MoveTo(cursor_col as u16, 1))?;
-                    }
-                    KeyCode::Right => {
-                        input_state.move_cursor_right();
-                        let cursor_col = cursor_pos.len() + input_state.pre_cursor_width();
-                        stdout.queue(MoveTo(cursor_col as u16, 1))?;
-                    }
-                    _ => {}
+                    return Ok(new_name.to_string());
                 }
+                KeyCode::Esc => {
+                    stdout.execute(Clear(ClearType::All))?;
+                    return Err(SelectorError::Cancelled);
+                }
+                KeyCode::Char(c) => {
+                    input_state.insert_char(c);
+                    // Redraw the input
+                    stdout.queue(MoveTo(cursor_pos.len() as u16, 1))?;
+                    stdout.queue(Clear(ClearType::UntilNewLine))?;
+                    stdout.queue(Print(&input_state.content()))?;
+                }
+                KeyCode::Backspace => {
+                    input_state.backspace();
+                    // Redraw the input
+                    stdout.queue(MoveTo(cursor_pos.len() as u16, 1))?;
+                    stdout.queue(Clear(ClearType::UntilNewLine))?;
+                    stdout.queue(Print(&input_state.content()))?;
+                }
+                KeyCode::Delete => {
+                    input_state.delete_char();
+                    // Redraw the input
+                    stdout.queue(MoveTo(cursor_pos.len() as u16, 1))?;
+                    stdout.queue(Clear(ClearType::UntilNewLine))?;
+                    stdout.queue(Print(&input_state.content()))?;
+                }
+                KeyCode::Left => {
+                    input_state.move_cursor_left();
+                    let cursor_col = cursor_pos.len() + input_state.pre_cursor_width();
+                    stdout.queue(MoveTo(cursor_col as u16, 1))?;
+                }
+                KeyCode::Right => {
+                    input_state.move_cursor_right();
+                    let cursor_col = cursor_pos.len() + input_state.pre_cursor_width();
+                    stdout.queue(MoveTo(cursor_col as u16, 1))?;
+                }
+                _ => {}
             }
-            stdout.flush()?;
         }
+        stdout.flush()?;
     }
 }

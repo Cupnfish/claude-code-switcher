@@ -67,10 +67,24 @@ impl KimiVariant {
         }
     }
 
-    pub fn env_var_name(&self) -> &'static str {
+    pub fn env_var_names(&self) -> Vec<&'static str> {
         match self {
-            KimiVariant::K2 | KimiVariant::K2Thinking => "MOONSHOT_API_KEY",
-            KimiVariant::KimiForCoding => "KIMI_API_KEY",
+            KimiVariant::K2 | KimiVariant::K2Thinking => {
+                vec![
+                    "MOONSHOT_API_KEY",
+                    "MOONSHOT_TOKEN",
+                    "K2_API_KEY",
+                    "MOONSHOT",
+                ]
+            }
+            KimiVariant::KimiForCoding => {
+                vec![
+                    "KIMI_API_KEY",
+                    "KIMI_TOKEN",
+                    "KIMI_FOR_CODING_API_KEY",
+                    "KIMI",
+                ]
+            }
         }
     }
 }
@@ -104,8 +118,8 @@ impl Template for KimiTemplate {
         crate::templates::TemplateType::Kimi
     }
 
-    fn env_var_name(&self) -> &'static str {
-        self.variant.env_var_name()
+    fn env_var_names(&self) -> Vec<&'static str> {
+        self.variant.env_var_names()
     }
 
     fn display_name(&self) -> &'static str {

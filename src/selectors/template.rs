@@ -24,6 +24,7 @@ impl TemplateSelector {
             TemplateType::Longcat,
             TemplateType::MiniMax,
             TemplateType::SeedCode,
+            TemplateType::Zenmux,
         ];
 
         let items: Vec<TemplateItem> = template_types.into_iter().map(TemplateItem::new).collect();
@@ -154,7 +155,6 @@ impl SelectableItem for TemplateItem {
 
     fn format_for_list(&self) -> String {
         let template_instance = get_template_instance(&self.template_type);
-        let env_var = template_instance.env_var_name();
         let env_vars = template_instance.env_var_names();
         let env_indicator = if env_vars.len() > 1 {
             format!(" (+{})", env_vars.len())
@@ -162,7 +162,7 @@ impl SelectableItem for TemplateItem {
             String::new()
         };
 
-        format!("{} ({}){}", self.template_type, env_var, env_indicator)
+        format!("{} ({:?}){}", self.template_type, env_vars, env_indicator)
     }
 
     fn id(&self) -> Option<String> {

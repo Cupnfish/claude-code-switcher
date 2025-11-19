@@ -119,15 +119,27 @@ impl CredentialSelector {
             return Ok(None);
         }
 
+        // Wrap credentials in simple list items to avoid showing too many details
+        let credential_items: Vec<CredentialListItem> = selector
+            .credentials
+            .iter()
+            .enumerate()
+            .map(|(index, cred)| CredentialListItem {
+                index,
+                credential: cred.clone(),
+                is_filter: false,
+            })
+            .collect();
+
         // Use framework for selection
         let mut base_selector = crate::selectors::base::BaseSelector::new(
-            selector.credentials.clone(),
+            credential_items,
             &format!("Select {} API key:", template_type),
         )
         .with_create(true);
 
         match base_selector.run() {
-            Ok(Some(credential)) => Ok(Some(credential.api_key().to_string())),
+            Ok(Some(selected_item)) => Ok(Some(selected_item.credential.api_key().to_string())),
             Ok(None) => Ok(None), // User cancelled
             Err(_) => {
                 // Handle create action

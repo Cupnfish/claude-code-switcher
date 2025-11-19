@@ -16,10 +16,6 @@ impl Template for DeepSeekTemplate {
         crate::templates::TemplateType::DeepSeek
     }
 
-    fn env_var_name(&self) -> &'static str {
-        "DEEPSEEK_API_KEY"
-    }
-
     fn env_var_names(&self) -> Vec<&'static str> {
         vec!["DEEPSEEK_API_KEY", "DEEPSEEK_API_TOKEN", "DEEPSEEK_TOKEN"]
     }

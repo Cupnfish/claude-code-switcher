@@ -16,8 +16,13 @@ impl Template for SeedCodeTemplate {
         crate::templates::TemplateType::SeedCode
     }
 
-    fn env_var_name(&self) -> &'static str {
-        "ARK_API_KEY"
+    fn env_var_names(&self) -> Vec<&'static str> {
+        vec![
+            "ARK_API_KEY",
+            "ARK_TOKEN",
+            "SEED_CODE_API_KEY",
+            "VOLCENGINE_API_KEY",
+        ]
     }
 
     fn display_name(&self) -> &'static str {
