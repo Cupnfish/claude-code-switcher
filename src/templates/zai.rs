@@ -210,6 +210,7 @@ impl Template for ZaiTemplate {
             env.insert("MAX_OUTPUT_TOKENS".to_string(), "96000".to_string());
             env.insert("MAX_MCP_OUTPUT_TOKENS".to_string(), "64000".to_string());
             env.insert("AUTH_HEADER_MODE".to_string(), "x-api-key".to_string());
+            env.insert("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(), "1".to_string());
             settings.env = Some(env);
         }
 
