@@ -17,6 +17,7 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             asset_name: ccs-x86_64-linux
+            use_cross: false
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             asset_name: ccs-aarch64-linux
@@ -24,12 +25,15 @@ jobs:
           - os: macos-latest
             target: x86_64-apple-darwin
             asset_name: ccs-x86_64-macos
+            use_native: true
           - os: macos-latest
             target: aarch64-apple-darwin
             asset_name: ccs-aarch64-macos
+            use_cross: true
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             asset_name: ccs-x86_64-windows
+            use_cross: false
     steps:
       - uses: actions/checkout@v4
 
@@ -37,7 +41,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.use_cross == true && matrix.target || '' }}
 
       - name: Install cross
         if: matrix.use_cross == true
@@ -49,7 +53,9 @@ jobs:
 
       - name: Build release binary
         run: |
-          if [ "${{ matrix.use_cross }}" = "true" ]; then
+          if [ "${{ matrix.use_native }}" = "true" ]; then
+            cargo build --release
+          elif [ "${{ matrix.use_cross }}" = "true" ]; then
             cross build --release --target ${{ matrix.target }}
           else
             cargo build --release --target ${{ matrix.target }}
@@ -59,7 +65,11 @@ jobs:
       - name: Prepare artifact (Unix)
         if: "!contains(runner.os, 'Windows')"
         run: |
-          cp target/${{ matrix.target }}/release/ccs ${{ matrix.asset_name }}
+          if [ "${{ matrix.use_native }}" = "true" ]; then
+            cp target/release/ccs ${{ matrix.asset_name }}
+          else
+            cp target/${{ matrix.target }}/release/ccs ${{ matrix.asset_name }}
+          fi
           chmod +x ${{ matrix.asset_name }}
 
       - name: Prepare artifact (Windows)
