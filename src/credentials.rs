@@ -641,7 +641,7 @@ mod tests {
             .create_credential("test".to_string(), "test-key", TemplateType::KatCoder)
             .unwrap();
 
-        let loaded = store.store.load(&credential.id()).unwrap();
+        let loaded = store.store.load(credential.id()).unwrap();
         assert_eq!(credential.name(), loaded.name());
         assert_eq!(credential.api_key(), loaded.api_key());
     }

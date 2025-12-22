@@ -41,6 +41,7 @@ jobs:
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             asset_name: ccs-aarch64-linux
+            use_cross: true
           - os: macos-latest
             target: x86_64-apple-darwin
             asset_name: ccs-x86_64-macos
@@ -59,31 +60,43 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.target }}
 
+      - name: Install cross
+        if: matrix.use_cross == true
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
       - uses: Swatinem/rust-cache@v2
 
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }}
+        run: |
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+        shell: bash
 
       - name: Prepare artifact (Unix)
-        if: runner.os != 'Windows'
+        if: "!contains(runner.os, 'Windows')"
         run: |
           cp target/${{ matrix.target }}/release/ccs ${{ matrix.asset_name }}
           chmod +x ${{ matrix.asset_name }}
 
       - name: Prepare artifact (Windows)
-        if: runner.os == 'Windows'
+        if: contains(runner.os, 'Windows')
         run: |
           copy target\${{ matrix.target }}\release\ccs.exe ${{ matrix.asset_name }}.exe
 
       - name: Upload artifact (Unix)
-        if: runner.os != 'Windows'
+        if: "!contains(runner.os, 'Windows')"
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
           path: ${{ matrix.asset_name }}
 
       - name: Upload artifact (Windows)
-        if: runner.os == 'Windows'
+        if: contains(runner.os, 'Windows')
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
@@ -102,6 +115,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          merge-multiple: false
 
       - name: Create release
         uses: softprops/action-gh-release@v2

@@ -108,8 +108,8 @@ mod tests {
         assert_eq!(cred.name(), "test-credential");
         assert_eq!(cred.api_key(), "sk-test123");
         assert_eq!(cred.template_type(), &TemplateType::DeepSeek);
-        assert!(cred.created_at().len() > 0);
-        assert!(cred.updated_at().len() > 0);
+        assert!(!cred.created_at().is_empty());
+        assert!(!cred.updated_at().is_empty());
     }
 
     #[test]
