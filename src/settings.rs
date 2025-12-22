@@ -1,5 +1,6 @@
 use anyhow::{Result, anyhow};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -9,7 +10,7 @@ use crate::snapshots::SnapshotScope;
 use crate::templates::TemplateType;
 
 /// Main Claude Code settings structure
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, PartialEq, Default)]
 pub struct ClaudeSettings {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub env: Option<std::collections::HashMap<String, String>>,
@@ -47,6 +48,102 @@ pub struct ClaudeSettings {
     pub status_line: Option<StatusLine>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subagent_model: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for ClaudeSettings {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Debug, Deserialize)]
+        struct ClaudeSettingsRaw {
+            #[serde(default, deserialize_with = "deserialize_env_opt")]
+            env: Option<HashMap<String, String>>,
+            #[serde(default)]
+            model: Option<String>,
+            #[serde(default)]
+            output_style: Option<String>,
+            #[serde(default)]
+            include_co_authored_by: Option<bool>,
+            #[serde(default)]
+            permissions: Option<Permissions>,
+            #[serde(default)]
+            hooks: Option<Hooks>,
+            #[serde(default)]
+            api_key_helper: Option<String>,
+            #[serde(default)]
+            cleanup_period_days: Option<u32>,
+            #[serde(default)]
+            disable_all_hooks: Option<bool>,
+            #[serde(default)]
+            force_login_method: Option<String>,
+            #[serde(default)]
+            force_login_org_uuid: Option<String>,
+            #[serde(default)]
+            enable_all_project_mcp_servers: Option<bool>,
+            #[serde(default)]
+            enabled_mcpjson_servers: Option<Vec<String>>,
+            #[serde(default)]
+            disabled_mcpjson_servers: Option<Vec<String>>,
+            #[serde(default)]
+            aws_auth_refresh: Option<String>,
+            #[serde(default)]
+            aws_credential_export: Option<String>,
+            #[serde(default)]
+            status_line: Option<StatusLine>,
+            #[serde(default)]
+            subagent_model: Option<String>,
+        }
+
+        let raw = ClaudeSettingsRaw::deserialize(deserializer)?;
+        Ok(ClaudeSettings {
+            env: raw.env,
+            model: raw.model,
+            output_style: raw.output_style,
+            include_co_authored_by: raw.include_co_authored_by,
+            permissions: raw.permissions,
+            hooks: raw.hooks,
+            api_key_helper: raw.api_key_helper,
+            cleanup_period_days: raw.cleanup_period_days,
+            disable_all_hooks: raw.disable_all_hooks,
+            force_login_method: raw.force_login_method,
+            force_login_org_uuid: raw.force_login_org_uuid,
+            enable_all_project_mcp_servers: raw.enable_all_project_mcp_servers,
+            enabled_mcpjson_servers: raw.enabled_mcpjson_servers,
+            disabled_mcpjson_servers: raw.disabled_mcpjson_servers,
+            aws_auth_refresh: raw.aws_auth_refresh,
+            aws_credential_export: raw.aws_credential_export,
+            status_line: raw.status_line,
+            subagent_model: raw.subagent_model,
+        })
+    }
+}
+
+/// Custom deserializer for optional env field that accepts mixed types
+fn deserialize_env_opt<'de, D>(deserializer: D) -> Result<Option<HashMap<String, String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw_opt: Option<Value> = Option::deserialize(deserializer)?;
+
+    match raw_opt {
+        Some(Value::Object(map)) => {
+            let mut env_map = HashMap::new();
+            for (key, value) in map.into_iter() {
+                let string_value = match value {
+                    Value::String(s) => s,
+                    Value::Number(n) => n.to_string(),
+                    Value::Bool(b) => b.to_string(),
+                    Value::Null => String::new(),
+                    _ => serde_json::to_string(&value).unwrap_or_default(),
+                };
+                env_map.insert(key, string_value);
+            }
+            Ok(Some(env_map))
+        }
+        Some(_) => Err(serde::de::Error::custom("env field must be an object")),
+        None => Ok(None),
+    }
 }
 
 /// Snapshot structure
@@ -194,10 +291,10 @@ impl ClaudeSettings {
     /// Capture environment variables for a specific template type
     pub fn capture_template_environment(template_type: &TemplateType) -> HashMap<String, String> {
         let mut env = HashMap::new();
-        
+
         // Use the template's env_var_names method to get all supported env vars
         let env_var_names = crate::templates::get_env_var_names(template_type);
-        
+
         for env_var_name in env_var_names {
             if let Ok(value) = std::env::var(env_var_name) {
                 env.insert(env_var_name.to_string(), value);
@@ -533,5 +630,67 @@ impl ClaudeSettings {
     /// Backward compatibility property for environment
     pub fn environment(&self) -> Option<&HashMap<String, String>> {
         self.env.as_ref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json;
+
+    #[test]
+    fn test_deserialize_env_with_integer_values() {
+        let json_with_int = r#"{
+            "env": {
+                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": 1,
+                "MAX_OUTPUT_TOKENS": "96000",
+                "ENABLE_THINKING": true,
+                "NULL_VALUE": null
+            }
+        }"#;
+
+        let settings: ClaudeSettings =
+            serde_json::from_str(json_with_int).expect("Should deserialize successfully");
+
+        let env = settings.env.expect("Should have env map");
+        assert_eq!(
+            env.get("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"),
+            Some(&"1".to_string())
+        );
+        assert_eq!(env.get("MAX_OUTPUT_TOKENS"), Some(&"96000".to_string()));
+        assert_eq!(env.get("ENABLE_THINKING"), Some(&"true".to_string()));
+        assert_eq!(env.get("NULL_VALUE"), Some(&"".to_string()));
+    }
+
+    #[test]
+    fn test_deserialize_env_string_values() {
+        let json_string_only = r#"{
+            "env": {
+                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+                "MAX_OUTPUT_TOKENS": "96000"
+            }
+        }"#;
+
+        let settings: ClaudeSettings =
+            serde_json::from_str(json_string_only).expect("Should deserialize successfully");
+
+        let env = settings.env.expect("Should have env map");
+        assert_eq!(
+            env.get("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"),
+            Some(&"1".to_string())
+        );
+        assert_eq!(env.get("MAX_OUTPUT_TOKENS"), Some(&"96000".to_string()));
+    }
+
+    #[test]
+    fn test_deserialize_env_no_env() {
+        let json_no_env = r#"{
+            "model": "test-model"
+        }"#;
+
+        let settings: ClaudeSettings =
+            serde_json::from_str(json_no_env).expect("Should deserialize successfully");
+
+        assert_eq!(settings.env, None);
     }
 }

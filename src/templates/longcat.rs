@@ -17,11 +17,7 @@ impl Template for LongcatTemplate {
     }
 
     fn env_var_names(&self) -> Vec<&'static str> {
-        vec![
-            "LONGCAT_API_KEY",
-            "LONGCAT_TOKEN",
-            "LONGCAT_AUTH_TOKEN",
-        ]
+        vec!["LONGCAT_API_KEY", "LONGCAT_TOKEN", "LONGCAT_AUTH_TOKEN"]
     }
 
     fn display_name(&self) -> &'static str {

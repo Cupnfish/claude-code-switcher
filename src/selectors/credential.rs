@@ -242,7 +242,7 @@ impl CredentialSelector {
         match selector.prompt()? {
             crate::selectors::base::SelectionResult::Selected(item) => {
                 if item.is_filter {
-                    return Self::filter_credentials(&self.credentials);
+                    Self::filter_credentials(&self.credentials)
                 } else {
                     Ok(Some(item.index))
                 }
@@ -272,8 +272,8 @@ impl CredentialSelector {
                 Ok(Some(item.index))
             }
             crate::selectors::base::SelectionResult::Back
-            | crate::selectors::base::SelectionResult::Exit
-            | _ => Ok(None),
+            | crate::selectors::base::SelectionResult::Exit => Ok(None),
+            _ => Ok(None),
         }
     }
 

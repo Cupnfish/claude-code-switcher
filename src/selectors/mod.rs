@@ -14,7 +14,7 @@ pub mod snapshot;
 pub mod template;
 
 // Re-export commonly used types
-pub use base::{SelectableItem, Selector, SelectionResult};
+pub use base::{SelectableItem, SelectionResult, Selector};
 pub use confirmation::ConfirmationService;
 pub use error::{SelectorError, SelectorResult};
 pub use navigation::{NavigationManager, NavigationResult};

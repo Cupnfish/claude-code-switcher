@@ -17,11 +17,7 @@ impl Template for MiniMaxTemplate {
     }
 
     fn env_var_names(&self) -> Vec<&'static str> {
-        vec![
-            "MINIMAX_API_KEY",
-            "MINIMAX_TOKEN",
-            "MINIMAX_AUTH_TOKEN",
-        ]
+        vec!["MINIMAX_API_KEY", "MINIMAX_TOKEN", "MINIMAX_AUTH_TOKEN"]
     }
 
     fn display_name(&self) -> &'static str {

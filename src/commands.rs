@@ -198,7 +198,10 @@ fn apply_template_command(
 
             let mut options = Vec::new();
             for (env_var_name, _) in &env_vars_with_keys {
-                options.push(format!("Use API key from environment variable {}", env_var_name));
+                options.push(format!(
+                    "Use API key from environment variable {}",
+                    env_var_name
+                ));
             }
             options.push("Enter a custom API key".to_string());
 
@@ -209,7 +212,10 @@ fn apply_template_command(
             // Find which env var was selected
             let mut selected_api_key: Option<String> = None;
             for (env_var_name, api_key) in &env_vars_with_keys {
-                if choice.contains(&format!("Use API key from environment variable {}", env_var_name)) {
+                if choice.contains(&format!(
+                    "Use API key from environment variable {}",
+                    env_var_name
+                )) {
                     println!("✓ Using API key from environment variable {}", env_var_name);
                     selected_api_key = Some(api_key.clone());
                     break;

@@ -28,10 +28,10 @@ impl ZaiRegion {
     pub fn description(&self) -> &'static str {
         match self {
             ZaiRegion::China => {
-                "Zhipu AI GLM-4.6 in China - Fast response with thinking capabilities"
+                "Zhipu AI GLM-4.7 in China - Fast response with thinking capabilities"
             }
             ZaiRegion::International => {
-                "Zhipu AI GLM-4.6 International - Global access with optimized routing"
+                "Zhipu AI GLM-4.7 International - Global access with optimized routing"
             }
         }
     }
@@ -45,15 +45,15 @@ impl ZaiRegion {
 
     pub fn model_name(&self) -> &'static str {
         match self {
-            ZaiRegion::China => "glm-4.6",
-            ZaiRegion::International => "glm-4.6",
+            ZaiRegion::China => "glm-4.7",
+            ZaiRegion::International => "glm-4.7",
         }
     }
 
     pub fn small_fast_model(&self) -> &'static str {
         match self {
-            ZaiRegion::China => "glm-4.6",
-            ZaiRegion::International => "glm-4.6-air",
+            ZaiRegion::China => "glm-4.7",
+            ZaiRegion::International => "glm-4.7",
         }
     }
 
@@ -210,7 +210,10 @@ impl Template for ZaiTemplate {
             env.insert("MAX_OUTPUT_TOKENS".to_string(), "96000".to_string());
             env.insert("MAX_MCP_OUTPUT_TOKENS".to_string(), "64000".to_string());
             env.insert("AUTH_HEADER_MODE".to_string(), "x-api-key".to_string());
-            env.insert("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(), "1".to_string());
+            env.insert(
+                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),
+                "1".to_string(),
+            );
             settings.env = Some(env);
         }
 

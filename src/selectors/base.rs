@@ -64,6 +64,7 @@ pub enum CursorStyle {
 }
 
 impl CursorStyle {
+    #[allow(clippy::wrong_self_convention)]
     fn to_ansi(&self) -> &'static str {
         match self {
             CursorStyle::Default => "\x1b[0 q",
@@ -353,7 +354,7 @@ impl<'a, T: SelectableItem + Clone> Selector<'a, T> {
                 Ok(KeyHandleResult::Continue)
             }
             KeyCode::Down => {
-                let max_index = self.get_total_option_count(&state) - 1;
+                let max_index = self.get_total_option_count(state) - 1;
                 if state.cursor_index < max_index {
                     state.cursor_index += 1;
                 }
@@ -367,7 +368,7 @@ impl<'a, T: SelectableItem + Clone> Selector<'a, T> {
                 Ok(KeyHandleResult::Continue)
             }
             KeyCode::PageDown => {
-                let max_index = self.get_total_option_count(&state) - 1;
+                let max_index = self.get_total_option_count(state) - 1;
                 let new_index = (state.cursor_index + self.config.page_size).min(max_index);
                 if new_index != state.cursor_index {
                     state.cursor_index = new_index;
@@ -379,7 +380,7 @@ impl<'a, T: SelectableItem + Clone> Selector<'a, T> {
                 Ok(KeyHandleResult::Continue)
             }
             KeyCode::End => {
-                state.cursor_index = self.get_total_option_count(&state) - 1;
+                state.cursor_index = self.get_total_option_count(state) - 1;
                 Ok(KeyHandleResult::Continue)
             }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -571,23 +572,26 @@ impl<'a, T: SelectableItem + Clone> Selector<'a, T> {
         let page_size = self.config.page_size;
         let half_page = page_size / 2;
 
-        let (scroll_offset, _cursor_in_page) = if options.len() <= page_size {
-            (0, state.cursor_index)
-        } else if state.cursor_index < half_page {
-            (0, state.cursor_index)
-        } else if state.cursor_index >= options.len() - half_page {
-            (
-                options.len().saturating_sub(page_size),
-                state.cursor_index - (options.len().saturating_sub(page_size)),
-            )
-        } else {
-            (state.cursor_index - half_page, half_page)
-        };
+        let (scroll_offset, _cursor_in_page) =
+            if options.len() <= page_size || state.cursor_index < half_page {
+                (0, state.cursor_index)
+            } else if state.cursor_index >= options.len() - half_page {
+                (
+                    options.len().saturating_sub(page_size),
+                    state.cursor_index - (options.len().saturating_sub(page_size)),
+                )
+            } else {
+                (state.cursor_index - half_page, half_page)
+            };
 
         // Render options
-        for i in scroll_offset..options.len().min(scroll_offset + page_size) {
+        for (i, option) in options
+            .iter()
+            .enumerate()
+            .take(options.len().min(scroll_offset + page_size))
+            .skip(scroll_offset)
+        {
             let is_cursor = i == state.cursor_index;
-            let option = &options[i];
 
             // Move to option line
             let visual_line = (i - scroll_offset) + 2; // +2 for prompt line and blank line
@@ -672,7 +676,7 @@ impl<'a, T: SelectableItem + Clone> Selector<'a, T> {
         // Filter option - only if enabled
         if self.config.show_filter {
             let filter_display = if state.input_state.is_empty() {
-                format!("🔍 Filter/Custom search...")
+                "🔍 Filter/Custom search...".to_string()
             } else {
                 format!("🔍 {}", state.input_state.content())
             };

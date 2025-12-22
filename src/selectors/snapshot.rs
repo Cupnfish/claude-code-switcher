@@ -32,8 +32,12 @@ fn get_text_input(
     io::stdin().read_line(&mut input)?;
 
     let input = input.trim();
-    if input.is_empty() && default.is_some() {
-        Ok(default.unwrap().to_string())
+    if input.is_empty() {
+        if let Some(d) = default {
+            Ok(d.to_string())
+        } else {
+            Ok(input.to_string())
+        }
     } else {
         Ok(input.to_string())
     }
@@ -272,7 +276,7 @@ impl SnapshotSelector {
         use std::io::{Write, stdout};
 
         let snapshot = &self.snapshots[index];
-        let actions = vec!["🔄 Apply", "✏️  Rename", "🗑️  Delete", "⬅️  Back"];
+        let actions = ["🔄 Apply", "✏️  Rename", "🗑️  Delete", "⬅️  Back"];
 
         // Setup terminal
         terminal::enable_raw_mode()?;
@@ -341,9 +345,7 @@ impl SnapshotSelector {
             if let Event::Key(KeyEvent { code, .. }) = read()? {
                 match code {
                     KeyCode::Up => {
-                        if selected_action > 0 {
-                            selected_action -= 1;
-                        }
+                        selected_action = selected_action.saturating_sub(1);
                     }
                     KeyCode::Down => {
                         if selected_action < actions.len() - 1 {
