@@ -80,6 +80,7 @@ mod tests {
         assert_eq!(format!("{}", TemplateType::DeepSeek), "deepseek");
         assert_eq!(format!("{}", TemplateType::Zai), "zai");
         assert_eq!(format!("{}", TemplateType::KatCoder), "kat-coder");
+        assert_eq!(format!("{}", TemplateType::Fishtrip), "fishtrip");
     }
 
     #[test]
@@ -153,5 +154,13 @@ mod tests {
             TemplateType::KatCoder
         );
         assert_eq!("kimi".parse::<TemplateType>().unwrap(), TemplateType::Kimi);
+        assert_eq!(
+            "fishtrip".parse::<TemplateType>().unwrap(),
+            TemplateType::Fishtrip
+        );
+        assert_eq!(
+            "fish".parse::<TemplateType>().unwrap(),
+            TemplateType::Fishtrip
+        );
     }
 }

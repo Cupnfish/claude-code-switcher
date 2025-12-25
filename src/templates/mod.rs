@@ -73,6 +73,7 @@ pub enum TemplateType {
     KatCoder,
     Kimi, // Unified Moonshot services (K2, K2 Thinking, Kimi For Coding)
     Longcat,
+    Fishtrip,
     MiniMax,
     SeedCode,
     Zenmux,
@@ -94,6 +95,7 @@ impl<'de> Deserialize<'de> for TemplateType {
             "KatCoder" => Ok(TemplateType::KatCoder),
             "Kimi" => Ok(TemplateType::Kimi),
             "Longcat" => Ok(TemplateType::Longcat),
+            "Fishtrip" => Ok(TemplateType::Fishtrip),
             "MiniMax" => Ok(TemplateType::MiniMax),
             "SeedCode" => Ok(TemplateType::SeedCode),
             "Zenmux" => Ok(TemplateType::Zenmux),
@@ -122,11 +124,12 @@ impl std::str::FromStr for TemplateType {
             "kat-coder-pro" | "katcoder-pro" | "katpro" => Ok(TemplateType::KatCoder), // Points to KatCoder with variant selection
             "kat-coder-air" | "katcoder-air" | "katair" => Ok(TemplateType::KatCoder), // Points to KatCoder with variant selection
             "longcat" => Ok(TemplateType::Longcat),
+            "fishtrip" | "fish" => Ok(TemplateType::Fishtrip),
             "minimax" | "minimax-anthropic" => Ok(TemplateType::MiniMax),
             "seed-code" | "seedcode" | "seed_code" => Ok(TemplateType::SeedCode),
             "zenmux" => Ok(TemplateType::Zenmux),
             _ => Err(anyhow!(
-                "Unknown template: {}. Available templates: deepseek, glm, k2, k2-thinking, kat-coder, kimi, longcat, minimax, seed-code, zenmux",
+                "Unknown template: {}. Available templates: deepseek, glm, k2, k2-thinking, kat-coder, kimi, longcat, fishtrip, fish, minimax, seed-code, zenmux",
                 s
             )),
         }
@@ -141,6 +144,7 @@ impl std::fmt::Display for TemplateType {
             TemplateType::KatCoder => write!(f, "kat-coder"),
             TemplateType::Kimi => write!(f, "kimi"), // Unified Moonshot services
             TemplateType::Longcat => write!(f, "longcat"),
+            TemplateType::Fishtrip => write!(f, "fishtrip"),
             TemplateType::MiniMax => write!(f, "minimax"),
             TemplateType::SeedCode => write!(f, "seed-code"),
             TemplateType::Zenmux => write!(f, "zenmux"),
@@ -161,6 +165,7 @@ pub fn get_all_templates() -> Vec<TemplateType> {
         TemplateType::KatCoder,
         TemplateType::Kimi, // Unified Moonshot services
         TemplateType::Longcat,
+        TemplateType::Fishtrip,
         TemplateType::MiniMax,
         TemplateType::SeedCode,
         TemplateType::Zenmux,
@@ -211,6 +216,7 @@ pub fn get_template_instance_with_input(
             }
         }
         TemplateType::Longcat => Box::new(longcat::LongcatTemplate),
+        TemplateType::Fishtrip => Box::new(fishtrip::FishtripTemplate),
         TemplateType::MiniMax => Box::new(minimax::MiniMaxTemplate),
         TemplateType::SeedCode => Box::new(seed_code::SeedCodeTemplate),
         TemplateType::Zenmux => Box::new(zenmux::ZenmuxTemplate),
@@ -230,6 +236,7 @@ pub fn get_template(template_type: &TemplateType) -> fn(&str, &SnapshotScope) ->
         TemplateType::KatCoder => create_kat_coder_template,
         TemplateType::Kimi => create_k2_template, // Default to K2 for backward compatibility
         TemplateType::Longcat => create_longcat_template,
+        TemplateType::Fishtrip => create_fishtrip_template,
         TemplateType::MiniMax => create_minimax_template,
         TemplateType::SeedCode => create_seed_code_template,
         TemplateType::Zenmux => create_zenmux_template,
@@ -238,6 +245,7 @@ pub fn get_template(template_type: &TemplateType) -> fn(&str, &SnapshotScope) ->
 
 // Import all template modules
 pub mod deepseek;
+pub mod fishtrip;
 pub mod kat_coder;
 pub mod kimi; // Unified module for all Moonshot services
 pub mod longcat;
@@ -248,6 +256,7 @@ pub mod zenmux;
 
 // Re-export for backward compatibility
 pub use deepseek::*;
+pub use fishtrip::*;
 pub use kat_coder::*;
 pub use kimi::*; // Includes legacy k2 functions
 pub use longcat::*;

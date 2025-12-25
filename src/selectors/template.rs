@@ -22,6 +22,7 @@ impl TemplateSelector {
             TemplateType::KatCoder,
             TemplateType::Kimi,
             TemplateType::Longcat,
+            TemplateType::Fishtrip,
             TemplateType::MiniMax,
             TemplateType::SeedCode,
             TemplateType::Zenmux,

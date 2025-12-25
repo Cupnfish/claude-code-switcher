@@ -29,7 +29,7 @@ Claude Code Switcher (`ccs`) 是一个专为 Claude Code 设计的 CLI 工具，
 | 特性 | 说明 |
 |------|------|
 | 🔄 **一键切换** | 无需手动编辑，一条命令完成 AI 提供商切换 |
-| 📦 **预设模板** | 内置 8+ 热门 AI 提供商，开箱即用 |
+| 📦 **预设模板** | 内置 9+ 热门 AI 提供商，开箱即用 |
 | 💾 **快照系统** | 保存自定义配置，随时一键恢复 |
 | 🔐 **安全存储** | API 密钥本地加密存储，支持多凭证管理 |
 | 🎨 **统一交互** | VSCode 风格的命令面板，操作直观流畅 |
@@ -99,6 +99,10 @@ ccs apply minimax
 ccs apply deepseek
 # 别名：ds
 
+# Fishtrip - Anthropic 兼容网关
+ccs apply fishtrip
+# 别名：fish
+
 # Kimi For Coding - 专注编程场景
 ccs apply kimi
 
@@ -122,6 +126,7 @@ ccs apply kat-coder-air
 | 🌟 **智谱 GLM** | `ccs apply zai` | `glm`, `zhipu` | 256K 上下文，高性价比 | ⭐⭐⭐⭐⭐ |
 | 🔥 **MiniMax** | `ccs apply minimax` | - | Anthropic 兼容，功能丰富 | ⭐⭐⭐⭐ |
 | 🚀 **DeepSeek** | `ccs apply deepseek` | `ds` | 价格优惠，响应快速 | ⭐⭐⭐⭐ |
+| 🐟 **Fishtrip** | `ccs apply fishtrip` | `fish` | Anthropic 兼容网关 | ⭐⭐⭐ |
 | 🎯 **Kimi** | `ccs apply kimi` | - | 专注编程，响应快速 | ⭐⭐⭐ |
 | 🔧 **KatCoder Pro** | `ccs apply kat-coder-pro` | `katpro` | 专业编程 AI | ⭐⭐⭐ |
 | 💨 **KatCoder Air** | `ccs apply kat-coder-air` | `katair` | 轻量级快速响应 | ⭐⭐ |
