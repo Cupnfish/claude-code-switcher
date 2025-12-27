@@ -125,7 +125,13 @@ impl std::str::FromStr for TemplateType {
             "kat-coder-air" | "katcoder-air" | "katair" => Ok(TemplateType::KatCoder), // Points to KatCoder with variant selection
             "longcat" => Ok(TemplateType::Longcat),
             "fishtrip" | "fish" => Ok(TemplateType::Fishtrip),
-            "minimax" | "minimax-anthropic" => Ok(TemplateType::MiniMax),
+            "minimax"
+            | "minimax-anthropic"
+            | "minimax-china"
+            | "minimax-ch"
+            | "minimax-international"
+            | "minimax-int"
+            | "minimax-io" => Ok(TemplateType::MiniMax),
             "seed-code" | "seedcode" | "seed_code" => Ok(TemplateType::SeedCode),
             "zenmux" => Ok(TemplateType::Zenmux),
             _ => Err(anyhow!(
@@ -217,7 +223,15 @@ pub fn get_template_instance_with_input(
         }
         TemplateType::Longcat => Box::new(longcat::LongcatTemplate),
         TemplateType::Fishtrip => Box::new(fishtrip::FishtripTemplate),
-        TemplateType::MiniMax => Box::new(minimax::MiniMaxTemplate),
+        TemplateType::MiniMax => {
+            // Check if specific region was requested
+            match input.to_lowercase().as_str() {
+                "minimax-international" | "minimax-int" | "minimax-io" => {
+                    Box::new(minimax::MiniMaxTemplate::international())
+                }
+                _ => Box::new(minimax::MiniMaxTemplate::china()), // Default to China
+            }
+        }
         TemplateType::SeedCode => Box::new(seed_code::SeedCodeTemplate),
         TemplateType::Zenmux => Box::new(zenmux::ZenmuxTemplate),
     }
