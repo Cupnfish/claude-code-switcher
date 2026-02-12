@@ -88,7 +88,7 @@ ccs --help
 ### 应用预设模板
 
 ```bash
-# 智谱 GLM（推荐）- 高性价比，支持 256K 上下文
+# 智谱 GLM-5（推荐）- Coding 能力对齐 Claude Opus 4.5，支持 200K 上下文
 ccs apply zai
 # 别名：glm, zhipu
 
@@ -123,7 +123,7 @@ ccs apply kat-coder-air
 
 | 提供商 | 命令 | 别名 | 特点 | 推荐度 |
 |--------|--------|------|------|--------|
-| 🌟 **智谱 GLM** | `ccs apply zai` | `glm`, `zhipu` | 256K 上下文，高性价比 | ⭐⭐⭐⭐⭐ |
+| 🌟 **智谱 GLM** | `ccs apply zai` | `glm`, `zhipu` | GLM-5，200K 上下文，128K 输出，Coding 对齐 Claude Opus 4.5 | ⭐⭐⭐⭐⭐ |
 | 🔥 **MiniMax** | `ccs apply minimax` | - | Anthropic 兼容，功能丰富 | ⭐⭐⭐⭐ |
 | 🚀 **DeepSeek** | `ccs apply deepseek` | `ds` | 价格优惠，响应快速 | ⭐⭐⭐⭐ |
 | 🐟 **Fishtrip** | `ccs apply fishtrip` | `fish` | Anthropic 兼容网关 | ⭐⭐⭐ |

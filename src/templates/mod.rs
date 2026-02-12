@@ -77,6 +77,7 @@ pub enum TemplateType {
     MiniMax,
     SeedCode,
     Zenmux,
+    Duojie,
 }
 
 impl<'de> Deserialize<'de> for TemplateType {
@@ -99,6 +100,7 @@ impl<'de> Deserialize<'de> for TemplateType {
             "MiniMax" => Ok(TemplateType::MiniMax),
             "SeedCode" => Ok(TemplateType::SeedCode),
             "Zenmux" => Ok(TemplateType::Zenmux),
+            "Duojie" => Ok(TemplateType::Duojie),
             _ => Err(serde::de::Error::custom(format!(
                 "unknown template type: {}",
                 s
@@ -134,8 +136,9 @@ impl std::str::FromStr for TemplateType {
             | "minimax-io" => Ok(TemplateType::MiniMax),
             "seed-code" | "seedcode" | "seed_code" => Ok(TemplateType::SeedCode),
             "zenmux" => Ok(TemplateType::Zenmux),
+            "duojie" | "dj" => Ok(TemplateType::Duojie),
             _ => Err(anyhow!(
-                "Unknown template: {}. Available templates: deepseek, glm, k2, k2-thinking, kat-coder, kimi, longcat, fishtrip, fish, minimax, seed-code, zenmux",
+                "Unknown template: {}. Available templates: deepseek, glm, k2, k2-thinking, kat-coder, kimi, longcat, fishtrip, fish, minimax, seed-code, zenmux, duojie",
                 s
             )),
         }
@@ -154,6 +157,7 @@ impl std::fmt::Display for TemplateType {
             TemplateType::MiniMax => write!(f, "minimax"),
             TemplateType::SeedCode => write!(f, "seed-code"),
             TemplateType::Zenmux => write!(f, "zenmux"),
+            TemplateType::Duojie => write!(f, "duojie"),
         }
     }
 }
@@ -175,6 +179,7 @@ pub fn get_all_templates() -> Vec<TemplateType> {
         TemplateType::MiniMax,
         TemplateType::SeedCode,
         TemplateType::Zenmux,
+        TemplateType::Duojie,
     ]
 }
 
@@ -234,6 +239,7 @@ pub fn get_template_instance_with_input(
         }
         TemplateType::SeedCode => Box::new(seed_code::SeedCodeTemplate),
         TemplateType::Zenmux => Box::new(zenmux::ZenmuxTemplate),
+        TemplateType::Duojie => Box::new(duojie::DuojieTemplate),
     }
 }
 
@@ -254,11 +260,13 @@ pub fn get_template(template_type: &TemplateType) -> fn(&str, &SnapshotScope) ->
         TemplateType::MiniMax => create_minimax_template,
         TemplateType::SeedCode => create_seed_code_template,
         TemplateType::Zenmux => create_zenmux_template,
+        TemplateType::Duojie => create_duojie_template,
     }
 }
 
 // Import all template modules
 pub mod deepseek;
+pub mod duojie;
 pub mod fishtrip;
 pub mod kat_coder;
 pub mod kimi; // Unified module for all Moonshot services
@@ -270,6 +278,7 @@ pub mod zenmux;
 
 // Re-export for backward compatibility
 pub use deepseek::*;
+pub use duojie::*;
 pub use fishtrip::*;
 pub use kat_coder::*;
 pub use kimi::*; // Includes legacy k2 functions

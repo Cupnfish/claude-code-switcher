@@ -81,6 +81,7 @@ mod tests {
         assert_eq!(format!("{}", TemplateType::Zai), "zai");
         assert_eq!(format!("{}", TemplateType::KatCoder), "kat-coder");
         assert_eq!(format!("{}", TemplateType::Fishtrip), "fishtrip");
+        assert_eq!(format!("{}", TemplateType::Duojie), "duojie");
     }
 
     #[test]
@@ -162,5 +163,7 @@ mod tests {
             "fish".parse::<TemplateType>().unwrap(),
             TemplateType::Fishtrip
         );
+        assert_eq!("duojie".parse::<TemplateType>().unwrap(), TemplateType::Duojie);
+        assert_eq!("dj".parse::<TemplateType>().unwrap(), TemplateType::Duojie);
     }
 }
