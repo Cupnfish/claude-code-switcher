@@ -74,14 +74,14 @@ impl Template for MiniMaxTemplate {
     }
 
     fn description(&self) -> &'static str {
-        "MiniMax M2.1 API - High-performance AI with Anthropic compatibility"
+        "MiniMax M2.5 API - High-performance AI with Anthropic compatibility"
     }
 
     fn create_settings(&self, api_key: &str, scope: &SnapshotScope) -> ClaudeSettings {
         let mut settings = ClaudeSettings::new();
 
         if matches!(scope, SnapshotScope::Common | SnapshotScope::All) {
-            settings.model = Some("MiniMax-M2.1".to_string());
+            settings.model = Some("MiniMax-M2.5".to_string());
 
             settings.permissions = Some(Permissions {
                 allow: Some(vec![
@@ -113,22 +113,22 @@ impl Template for MiniMaxTemplate {
                 "ANTHROPIC_BASE_URL".to_string(),
                 self.region.base_url().to_string(),
             );
-            env.insert("ANTHROPIC_MODEL".to_string(), "MiniMax-M2.1".to_string());
+            env.insert("ANTHROPIC_MODEL".to_string(), "MiniMax-M2.5".to_string());
             env.insert(
                 "ANTHROPIC_SMALL_FAST_MODEL".to_string(),
-                "MiniMax-M2.1".to_string(),
+                "MiniMax-M2.5".to_string(),
             );
             env.insert(
                 "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
-                "MiniMax-M2.1".to_string(),
+                "MiniMax-M2.5".to_string(),
             );
             env.insert(
                 "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
-                "MiniMax-M2.1".to_string(),
+                "MiniMax-M2.5".to_string(),
             );
             env.insert(
                 "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
-                "MiniMax-M2.1".to_string(),
+                "MiniMax-M2.5".to_string(),
             );
             env.insert("API_TIMEOUT_MS".to_string(), "3000000".to_string());
             env.insert(

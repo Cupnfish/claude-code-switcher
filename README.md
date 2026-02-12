@@ -92,7 +92,7 @@ ccs --help
 ccs apply zai
 # 别名：glm, zhipu
 
-# MiniMax - Anthropic 兼容，功能丰富
+# MiniMax M2.5 - Anthropic 兼容，高性能 AI
 ccs apply minimax
 
 # DeepSeek - 价格优惠，响应快速
@@ -124,7 +124,7 @@ ccs apply kat-coder-air
 | 提供商 | 命令 | 别名 | 特点 | 推荐度 |
 |--------|--------|------|------|--------|
 | 🌟 **智谱 GLM** | `ccs apply zai` | `glm`, `zhipu` | GLM-5，200K 上下文，128K 输出，Coding 对齐 Claude Opus 4.5 | ⭐⭐⭐⭐⭐ |
-| 🔥 **MiniMax** | `ccs apply minimax` | - | Anthropic 兼容，功能丰富 | ⭐⭐⭐⭐ |
+| 🔥 **MiniMax** | `ccs apply minimax` | - | M2.5 模型，Anthropic 兼容 | ⭐⭐⭐⭐ |
 | 🚀 **DeepSeek** | `ccs apply deepseek` | `ds` | 价格优惠，响应快速 | ⭐⭐⭐⭐ |
 | 🐟 **Fishtrip** | `ccs apply fishtrip` | `fish` | Anthropic 兼容网关 | ⭐⭐⭐ |
 | 🎯 **Kimi** | `ccs apply kimi` | - | 专注编程，响应快速 | ⭐⭐⭐ |
