@@ -32,7 +32,7 @@ impl Template for FishtripTemplate {
         let mut settings = ClaudeSettings::new();
 
         if matches!(scope, SnapshotScope::Common | SnapshotScope::All) {
-            settings.model = Some("claude-opus-4-5-20251101".to_string());
+            settings.model = Some("claude-opus-4-6".to_string());
 
             settings.permissions = Some(Permissions {
                 allow: Some(vec![
@@ -65,11 +65,11 @@ impl Template for FishtripTemplate {
             );
             env.insert(
                 "ANTHROPIC_MODEL".to_string(),
-                "claude-opus-4-5-20251101".to_string(),
+                "claude-opus-4-6".to_string(),
             );
             env.insert(
                 "ANTHROPIC_SMALL_FAST_MODEL".to_string(),
-                "claude-opus-4-5-20251101".to_string(),
+                "claude-opus-4-6".to_string(),
             );
             env.insert("API_TIMEOUT_MS".to_string(), "600000".to_string());
             env.insert(

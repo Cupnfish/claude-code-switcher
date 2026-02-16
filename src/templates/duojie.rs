@@ -25,14 +25,14 @@ impl Template for DuojieTemplate {
     }
 
     fn description(&self) -> &'static str {
-        "Duojie.games - Claude Opus 4.5 API access"
+        "Duojie.games - Claude Opus 4.6 API access"
     }
 
     fn create_settings(&self, api_key: &str, scope: &SnapshotScope) -> ClaudeSettings {
         let mut settings = ClaudeSettings::new();
 
         if matches!(scope, SnapshotScope::Common | SnapshotScope::All) {
-            settings.model = Some("claude-opus-4-5-think".to_string());
+            settings.model = Some("claude-opus-4-6-kiro".to_string());
 
             settings.permissions = Some(Permissions {
                 allow: Some(vec![
@@ -63,10 +63,13 @@ impl Template for DuojieTemplate {
                 "https://api.duojie.games".to_string(),
             );
             env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.to_string());
-            env.insert("ANTHROPIC_MODEL".to_string(), "claude-opus-4-5-think".to_string());
+            env.insert(
+                "ANTHROPIC_MODEL".to_string(),
+                "claude-opus-4-6-kiro".to_string(),
+            );
             env.insert(
                 "ANTHROPIC_SMALL_FAST_MODEL".to_string(),
-                "claude-opus-4-5-think".to_string(),
+                "claude-opus-4-6-kiro".to_string(),
             );
             env.insert("API_TIMEOUT_MS".to_string(), "600000".to_string());
             settings.env = Some(env);

@@ -154,7 +154,8 @@ fn apply_template_command(
     let template_instance = if initial_template.has_variants()
         && ((target == "kat-coder" || target == "katcoder" || target == "kat")
             || (target == "kimi")
-            || (target == "zai" || target == "glm" || target == "zhipu"))
+            || (target == "zai" || target == "glm" || target == "zhipu")
+            || (target == "anyrouter" || target == "anyr" || target == "ar"))
     {
         // Use template's interactive creation method
         match template_type {
@@ -170,6 +171,11 @@ fn apply_template_command(
             crate::templates::TemplateType::Zai => {
                 let zai_template = crate::templates::zai::ZaiTemplate::create_interactively()?;
                 Box::new(zai_template) as Box<dyn Template>
+            }
+            crate::templates::TemplateType::AnyRouter => {
+                let anyrouter_template =
+                    crate::templates::anyrouter::AnyRouterTemplate::create_interactively()?;
+                Box::new(anyrouter_template) as Box<dyn Template>
             }
             _ => initial_template,
         }

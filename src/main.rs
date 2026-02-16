@@ -163,7 +163,10 @@ mod tests {
             "fish".parse::<TemplateType>().unwrap(),
             TemplateType::Fishtrip
         );
-        assert_eq!("duojie".parse::<TemplateType>().unwrap(), TemplateType::Duojie);
+        assert_eq!(
+            "duojie".parse::<TemplateType>().unwrap(),
+            TemplateType::Duojie
+        );
         assert_eq!("dj".parse::<TemplateType>().unwrap(), TemplateType::Duojie);
     }
 }

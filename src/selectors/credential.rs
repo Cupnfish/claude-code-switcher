@@ -102,65 +102,109 @@ impl CredentialSelector {
         let selector = Self::new_for_template(&template_type)?;
 
         if selector.credentials.is_empty() {
-            // No saved credentials, prompt for new API key
-            let template_instance = get_template_instance(&template_type);
-            if let Some(url) = template_instance.api_key_url() {
-                println!("  💡 Get your API key from: {}", url);
-            }
-
-            let prompt_text = format!("Enter your {} API key:", template_type);
-            let api_key = inquire::Text::new(&prompt_text)
-                .with_placeholder("sk-...")
-                .prompt()?;
-
-            if !api_key.trim().is_empty() {
-                return Ok(Some(api_key));
-            }
-            return Ok(None);
+            // No saved credentials, prompt for new API key directly
+            return Self::prompt_new_api_key(&template_type);
         }
 
-        // Wrap credentials in simple list items to avoid showing too many details
-        let credential_items: Vec<CredentialListItem> = selector
-            .credentials
-            .iter()
-            .enumerate()
-            .map(|(index, cred)| CredentialListItem {
-                index,
-                credential: cred.clone(),
-                is_filter: false,
-            })
-            .collect();
+        let mut credentials = selector.credentials;
+        let title = format!("Select {} API key:", template_type);
 
-        // Use framework for selection
-        let mut base_selector = crate::selectors::base::BaseSelector::new(
-            credential_items,
-            &format!("Select {} API key:", template_type),
-        )
-        .with_create(true);
-
-        match base_selector.run() {
-            Ok(Some(selected_item)) => Ok(Some(selected_item.credential.api_key().to_string())),
-            Ok(None) => Ok(None), // User cancelled
-            Err(_) => {
-                // Handle create action
-                let template_instance = get_template_instance(&template_type);
-                if let Some(url) = template_instance.api_key_url() {
-                    println!("  💡 Get your API key from: {}", url);
-                }
-
-                let prompt_text = format!("Enter your {} API key:", template_type);
-                let api_key = inquire::Text::new(&prompt_text)
-                    .with_placeholder("sk-...")
-                    .prompt()?;
-
-                if !api_key.trim().is_empty() {
-                    Ok(Some(api_key))
-                } else {
-                    Err(SelectorError::InvalidInput(
-                        "API key cannot be empty".to_string(),
-                    ))
-                }
+        loop {
+            if credentials.is_empty() {
+                // All credentials deleted, prompt for new API key
+                return Self::prompt_new_api_key(&template_type);
             }
+
+            let credential_items: Vec<CredentialListItem> = credentials
+                .iter()
+                .enumerate()
+                .map(|(index, cred)| CredentialListItem {
+                    index,
+                    credential: cred.clone(),
+                    is_filter: false,
+                })
+                .collect();
+
+            // Picker mode: Enter directly selects, but d/n/r management shortcuts are available
+            let config = crate::selectors::base::SelectorConfig {
+                allow_create: true,
+                allow_management: true,
+                ..crate::selectors::base::SelectorConfig::default()
+            };
+
+            let mut sel = crate::selectors::base::Selector::new(&title, credential_items)
+                .with_config(config);
+
+            match sel.prompt()? {
+                crate::selectors::base::SelectionResult::Selected(item)
+                | crate::selectors::base::SelectionResult::ViewDetails(item) => {
+                    return Ok(Some(item.credential.api_key().to_string()));
+                }
+                crate::selectors::base::SelectionResult::Create => {
+                    return Self::prompt_new_api_key(&template_type);
+                }
+                crate::selectors::base::SelectionResult::Delete(item) => {
+                    // Perform deletion with confirmation
+                    let credential = &item.credential;
+                    let confirmed = ConfirmationService::confirm_deletion(
+                        credential.name(),
+                        "credential",
+                    )?;
+                    if confirmed {
+                        let store = CredentialStore::new().map_err(|e| {
+                            SelectorError::Storage(format!(
+                                "Failed to create credential store: {}",
+                                e
+                            ))
+                        })?;
+                        store.delete_credential(credential.id()).map_err(|e| {
+                            SelectorError::OperationFailed(format!(
+                                "Failed to delete credential: {}",
+                                e
+                            ))
+                        })?;
+                        credentials.remove(item.index);
+                    }
+                    // Loop back to re-show the list
+                    continue;
+                }
+                crate::selectors::base::SelectionResult::Back
+                | crate::selectors::base::SelectionResult::Exit => {
+                    return Ok(None);
+                }
+                // Other actions (Rename, Refresh, etc.) — just re-show the list
+                _ => continue,
+            }
+        }
+    }
+
+    /// Prompt for a new API key on a clean page
+    fn prompt_new_api_key(
+        template_type: &templates::TemplateType,
+    ) -> SelectorResult<Option<String>> {
+        // Clear screen for a clean page transition
+        print!("\x1b[2J\x1b[H");
+        io::stdout().flush().ok();
+
+        let template_instance = get_template_instance(template_type);
+
+        println!("🔑 Create New API Key\n");
+
+        if let Some(url) = template_instance.api_key_url() {
+            println!("  💡 Get your API key from: {}\n", url);
+        }
+
+        let prompt_text = format!("Enter your {} API key:", template_type);
+        let api_key = inquire::Text::new(&prompt_text)
+            .with_placeholder("sk-...")
+            .prompt()?;
+
+        if !api_key.trim().is_empty() {
+            Ok(Some(api_key))
+        } else {
+            Err(SelectorError::InvalidInput(
+                "API key cannot be empty".to_string(),
+            ))
         }
     }
 

@@ -78,6 +78,7 @@ pub enum TemplateType {
     SeedCode,
     Zenmux,
     Duojie,
+    AnyRouter,
 }
 
 impl<'de> Deserialize<'de> for TemplateType {
@@ -101,6 +102,7 @@ impl<'de> Deserialize<'de> for TemplateType {
             "SeedCode" => Ok(TemplateType::SeedCode),
             "Zenmux" => Ok(TemplateType::Zenmux),
             "Duojie" => Ok(TemplateType::Duojie),
+            "AnyRouter" => Ok(TemplateType::AnyRouter),
             _ => Err(serde::de::Error::custom(format!(
                 "unknown template type: {}",
                 s
@@ -137,8 +139,13 @@ impl std::str::FromStr for TemplateType {
             "seed-code" | "seedcode" | "seed_code" => Ok(TemplateType::SeedCode),
             "zenmux" => Ok(TemplateType::Zenmux),
             "duojie" | "dj" => Ok(TemplateType::Duojie),
+            "anyrouter" | "anyr" | "ar" | "anyrouter-china" | "anyrouter-fast" | "anyr-china"
+            | "anyr-fast" | "ar-china" | "ar-fast" | "anyrouter-fallback" | "anyrouter-stable"
+            | "anyr-fallback" | "anyr-stable" | "ar-fallback" | "ar-stable" => {
+                Ok(TemplateType::AnyRouter)
+            }
             _ => Err(anyhow!(
-                "Unknown template: {}. Available templates: deepseek, glm, k2, k2-thinking, kat-coder, kimi, longcat, fishtrip, fish, minimax, seed-code, zenmux, duojie",
+                "Unknown template: {}. Available templates: deepseek, glm, k2, k2-thinking, kat-coder, kimi, longcat, fishtrip, fish, minimax, seed-code, zenmux, duojie, anyrouter",
                 s
             )),
         }
@@ -158,6 +165,7 @@ impl std::fmt::Display for TemplateType {
             TemplateType::SeedCode => write!(f, "seed-code"),
             TemplateType::Zenmux => write!(f, "zenmux"),
             TemplateType::Duojie => write!(f, "duojie"),
+            TemplateType::AnyRouter => write!(f, "anyrouter"),
         }
     }
 }
@@ -180,6 +188,7 @@ pub fn get_all_templates() -> Vec<TemplateType> {
         TemplateType::SeedCode,
         TemplateType::Zenmux,
         TemplateType::Duojie,
+        TemplateType::AnyRouter,
     ]
 }
 
@@ -240,6 +249,16 @@ pub fn get_template_instance_with_input(
         TemplateType::SeedCode => Box::new(seed_code::SeedCodeTemplate),
         TemplateType::Zenmux => Box::new(zenmux::ZenmuxTemplate),
         TemplateType::Duojie => Box::new(duojie::DuojieTemplate),
+        TemplateType::AnyRouter => {
+            // Check if specific region was requested
+            match input.to_lowercase().as_str() {
+                "anyrouter-china" | "anyrouter-fast" | "anyr-china" | "anyr-fast" | "ar-china"
+                | "ar-fast" => Box::new(anyrouter::AnyRouterTemplate::china()),
+                "anyrouter-fallback" | "anyrouter-stable" | "anyr-fallback" | "anyr-stable"
+                | "ar-fallback" | "ar-stable" => Box::new(anyrouter::AnyRouterTemplate::fallback()),
+                _ => Box::new(anyrouter::AnyRouterTemplate::china()), // Default to China for fast access
+            }
+        }
     }
 }
 
@@ -261,10 +280,12 @@ pub fn get_template(template_type: &TemplateType) -> fn(&str, &SnapshotScope) ->
         TemplateType::SeedCode => create_seed_code_template,
         TemplateType::Zenmux => create_zenmux_template,
         TemplateType::Duojie => create_duojie_template,
+        TemplateType::AnyRouter => create_anyrouter_template,
     }
 }
 
 // Import all template modules
+pub mod anyrouter;
 pub mod deepseek;
 pub mod duojie;
 pub mod fishtrip;
@@ -277,6 +298,7 @@ pub mod zai;
 pub mod zenmux;
 
 // Re-export for backward compatibility
+pub use anyrouter::*;
 pub use deepseek::*;
 pub use duojie::*;
 pub use fishtrip::*;

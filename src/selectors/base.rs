@@ -81,6 +81,7 @@ pub struct SelectorConfig {
     pub cursor_style: CursorStyle,
     pub allow_create: bool,
     pub allow_custom: bool,
+    pub allow_management: bool, // Enable d/n/r shortcuts and ViewDetails on Enter
     pub show_item_count: bool,
     pub preserve_position_on_refresh: bool,
     pub show_filter: bool, // New: show/hide filter input
@@ -93,6 +94,7 @@ impl Default for SelectorConfig {
             cursor_style: CursorStyle::Block,
             allow_create: false,
             allow_custom: false,
+            allow_management: true, // Default to true for backward compatibility
             show_item_count: true,
             preserve_position_on_refresh: true,
             show_filter: true, // Default to showing filter
@@ -397,30 +399,38 @@ impl<'a, T: SelectableItem + Clone> Selector<'a, T> {
                     return Ok(KeyHandleResult::Continue);
                 }
 
-                // Only check for shortcuts when not on filter option
-                match c.to_lowercase().collect::<String>().as_str() {
-                    "d" => {
-                        // Delete operation
-                        if let Some(item) = self.get_item_at_cursor(state) {
-                            return Ok(KeyHandleResult::Submit(SelectionResult::Delete(item)));
+                // Only check for shortcuts when not on filter option and management is enabled
+                if self.config.allow_management {
+                    match c.to_lowercase().collect::<String>().as_str() {
+                        "d" => {
+                            // Delete operation
+                            if let Some(item) = self.get_item_at_cursor(state) {
+                                return Ok(KeyHandleResult::Submit(SelectionResult::Delete(item)));
+                            }
+                        }
+                        "n" => {
+                            // Rename operation
+                            if let Some(item) = self.get_item_at_cursor(state) {
+                                return Ok(KeyHandleResult::Submit(SelectionResult::Rename(item)));
+                            }
+                        }
+                        "r" => {
+                            // Refresh operation - only when not on filter option
+                            return Ok(KeyHandleResult::Refresh);
+                        }
+                        _ => {
+                            // Only add to filter if filter is enabled
+                            if self.config.show_filter {
+                                state.input_state.insert_char(c);
+                                self.update_filter(state);
+                            }
                         }
                     }
-                    "n" => {
-                        // Rename operation
-                        if let Some(item) = self.get_item_at_cursor(state) {
-                            return Ok(KeyHandleResult::Submit(SelectionResult::Rename(item)));
-                        }
-                    }
-                    "r" => {
-                        // Refresh operation - only when not on filter option
-                        return Ok(KeyHandleResult::Refresh);
-                    }
-                    _ => {
-                        // Only add to filter if filter is enabled
-                        if self.config.show_filter {
-                            state.input_state.insert_char(c);
-                            self.update_filter(state);
-                        }
+                } else {
+                    // Management disabled: treat all chars as filter input
+                    if self.config.show_filter {
+                        state.input_state.insert_char(c);
+                        self.update_filter(state);
                     }
                 }
                 Ok(KeyHandleResult::Continue)
@@ -453,10 +463,26 @@ impl<'a, T: SelectableItem + Clone> Selector<'a, T> {
             KeyCode::Right => {
                 // Right arrow behavior depends on context
                 let is_on_filter = self.config.show_filter && state.cursor_index == 0;
+                let is_on_create = self.config.allow_create
+                    && state.cursor_index
+                        == state.filtered_items.len()
+                            + if self.config.show_filter { 1 } else { 0 };
+                let is_on_custom = self.config.allow_custom
+                    && state.cursor_index
+                        == state.filtered_items.len()
+                            + if self.config.allow_create { 1 } else { 0 }
+                            + if self.config.show_filter { 1 } else { 0 };
+
                 if is_on_filter {
                     // On filter option, move cursor right in input
                     state.input_state.move_cursor_right();
                     Ok(KeyHandleResult::Continue)
+                } else if is_on_create {
+                    Ok(KeyHandleResult::Submit(SelectionResult::Create))
+                } else if is_on_custom {
+                    Ok(KeyHandleResult::Submit(SelectionResult::CustomInput(
+                        state.filter_text.clone(),
+                    )))
                 } else {
                     // On item, select it directly
                     if let Some(item) = self.get_item_at_cursor(state) {
@@ -469,6 +495,16 @@ impl<'a, T: SelectableItem + Clone> Selector<'a, T> {
             KeyCode::Enter => {
                 // Enter on filter option selects first filtered item or treats as custom input
                 let is_on_filter = self.config.show_filter && state.cursor_index == 0;
+                let is_on_create = self.config.allow_create
+                    && state.cursor_index
+                        == state.filtered_items.len()
+                            + if self.config.show_filter { 1 } else { 0 };
+                let is_on_custom = self.config.allow_custom
+                    && state.cursor_index
+                        == state.filtered_items.len()
+                            + if self.config.allow_create { 1 } else { 0 }
+                            + if self.config.show_filter { 1 } else { 0 };
+
                 if is_on_filter {
                     if let Some(item) = state.filtered_items.first() {
                         Ok(KeyHandleResult::Submit(SelectionResult::Selected(
@@ -481,9 +517,20 @@ impl<'a, T: SelectableItem + Clone> Selector<'a, T> {
                     } else {
                         Ok(KeyHandleResult::Continue)
                     }
+                } else if is_on_create {
+                    Ok(KeyHandleResult::Submit(SelectionResult::Create))
+                } else if is_on_custom {
+                    Ok(KeyHandleResult::Submit(SelectionResult::CustomInput(
+                        state.filter_text.clone(),
+                    )))
                 } else if let Some(item) = self.get_item_at_cursor(state) {
-                    // Enter on actual item shows details (secondary menu)
-                    Ok(KeyHandleResult::Submit(SelectionResult::ViewDetails(item)))
+                    if self.config.allow_management {
+                        // Management mode: Enter shows details/secondary menu
+                        Ok(KeyHandleResult::Submit(SelectionResult::ViewDetails(item)))
+                    } else {
+                        // Picker mode: Enter directly selects the item
+                        Ok(KeyHandleResult::Submit(SelectionResult::Selected(item)))
+                    }
                 } else {
                     Ok(KeyHandleResult::Continue)
                 }
@@ -744,12 +791,15 @@ impl<'a, T: SelectableItem + Clone> Selector<'a, T> {
                 help_parts.push("←→ to move cursor".to_string());
             }
 
-            help_parts.extend_from_slice(&[
-                "d: Delete".to_string(),
-                "n: Rename".to_string(),
-                "r: Refresh".to_string(),
-                "Esc: Back".to_string(),
-            ]);
+            if self.config.allow_management {
+                help_parts.extend_from_slice(&[
+                    "d: Delete".to_string(),
+                    "n: Rename".to_string(),
+                    "r: Refresh".to_string(),
+                ]);
+            }
+
+            help_parts.push("Esc: Back".to_string());
 
             help_parts.join(", ")
         } else {

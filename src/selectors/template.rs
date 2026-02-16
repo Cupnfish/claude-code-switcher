@@ -26,6 +26,8 @@ impl TemplateSelector {
             TemplateType::MiniMax,
             TemplateType::SeedCode,
             TemplateType::Zenmux,
+            TemplateType::Duojie,
+            TemplateType::AnyRouter,
         ];
 
         let items: Vec<TemplateItem> = template_types.into_iter().map(TemplateItem::new).collect();
