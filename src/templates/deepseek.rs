@@ -32,6 +32,10 @@ impl Template for DeepSeekTemplate {
         Some("https://platform.deepseek.com/api_keys")
     }
 
+    fn api_host(&self) -> Option<&'static str> {
+        Some("api.deepseek.com")
+    }
+
     fn create_settings(&self, api_key: &str, scope: &SnapshotScope) -> ClaudeSettings {
         let mut settings = ClaudeSettings::new();
 

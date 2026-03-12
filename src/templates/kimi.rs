@@ -87,6 +87,13 @@ impl KimiVariant {
             }
         }
     }
+
+    pub fn api_host(&self) -> &'static str {
+        match self {
+            KimiVariant::K2 | KimiVariant::K2Thinking => "api.moonshot.cn",
+            KimiVariant::KimiForCoding => "api.kimi.com",
+        }
+    }
 }
 
 /// Kimi/Moonshot AI provider template
@@ -132,6 +139,10 @@ impl Template for KimiTemplate {
 
     fn api_key_url(&self) -> Option<&'static str> {
         Some(self.variant.api_key_url())
+    }
+
+    fn api_host(&self) -> Option<&'static str> {
+        Some(self.variant.api_host())
     }
 
     fn has_variants(&self) -> bool {

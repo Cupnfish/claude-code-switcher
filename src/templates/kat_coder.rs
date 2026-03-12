@@ -87,6 +87,10 @@ impl Template for KatCoderTemplate {
         Some("https://console.volcengine.com/ark/region:ark+cn-beijing/apikey")
     }
 
+    fn api_host(&self) -> Option<&'static str> {
+        Some("wanqing.streamlakeapi.com")
+    }
+
     fn has_variants(&self) -> bool {
         true
     }

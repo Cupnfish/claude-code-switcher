@@ -37,6 +37,10 @@ impl Template for SeedCodeTemplate {
         Some("https://console.volcengine.com/ark/region:ark+cn-beijing/apikey")
     }
 
+    fn api_host(&self) -> Option<&'static str> {
+        Some("ark.cn-beijing.volces.com")
+    }
+
     fn create_settings(&self, api_key: &str, scope: &SnapshotScope) -> ClaudeSettings {
         let mut settings = ClaudeSettings::new();
 

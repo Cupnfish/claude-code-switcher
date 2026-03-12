@@ -28,6 +28,10 @@ impl Template for LongcatTemplate {
         "Longcat Flash Chat API - Fast and efficient conversational AI"
     }
 
+    fn api_host(&self) -> Option<&'static str> {
+        Some("api.longcat.chat")
+    }
+
     fn create_settings(&self, api_key: &str, scope: &SnapshotScope) -> ClaudeSettings {
         let mut settings = ClaudeSettings::new();
 

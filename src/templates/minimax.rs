@@ -24,6 +24,14 @@ impl MiniMaxRegion {
             MiniMaxRegion::International => "https://api.minimax.io/anthropic",
         }
     }
+
+    /// Get the API host for this region
+    fn api_host(&self) -> &'static str {
+        match self {
+            MiniMaxRegion::China => "api.minimaxi.com",
+            MiniMaxRegion::International => "api.minimax.io",
+        }
+    }
 }
 
 /// MiniMax AI provider template
@@ -143,6 +151,10 @@ impl Template for MiniMaxTemplate {
 
     fn api_key_url(&self) -> Option<&'static str> {
         Some("https://platform.minimaxi.com/user-center/basic-information/interface-key")
+    }
+
+    fn api_host(&self) -> Option<&'static str> {
+        Some(self.region.api_host())
     }
 }
 

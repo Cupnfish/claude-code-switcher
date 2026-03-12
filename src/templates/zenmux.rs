@@ -44,6 +44,10 @@ impl Template for ZenmuxTemplate {
         Some("https://zenmux.ai/settings/keys")
     }
 
+    fn api_host(&self) -> Option<&'static str> {
+        Some("zenmux.ai")
+    }
+
     fn create_settings(&self, api_key: &str, scope: &SnapshotScope) -> ClaudeSettings {
         let mut settings = ClaudeSettings::new();
 

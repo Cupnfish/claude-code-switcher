@@ -31,6 +31,12 @@ pub trait Template {
         None
     }
 
+    /// Get the API host for this template (for patching Claude CLI)
+    /// Returns the host portion of the API URL (e.g., "api.deepseek.com")
+    fn api_host(&self) -> Option<&'static str> {
+        None
+    }
+
     /// Check if this template requires additional configuration (like endpoint ID)
     fn requires_additional_config(&self) -> bool {
         false

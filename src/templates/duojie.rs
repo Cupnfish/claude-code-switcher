@@ -28,6 +28,10 @@ impl Template for DuojieTemplate {
         "Duojie.games - Claude Opus 4.6 API access"
     }
 
+    fn api_host(&self) -> Option<&'static str> {
+        Some("api.duojie.games")
+    }
+
     fn create_settings(&self, api_key: &str, scope: &SnapshotScope) -> ClaudeSettings {
         let mut settings = ClaudeSettings::new();
 

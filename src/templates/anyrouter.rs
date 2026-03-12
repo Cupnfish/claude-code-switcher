@@ -48,6 +48,13 @@ impl AnyRouterRegion {
     pub fn small_fast_model(&self) -> &'static str {
         "claude-opus-4-6"
     }
+
+    pub fn api_host(&self) -> &'static str {
+        match self {
+            AnyRouterRegion::China => "a-ocnfniawgw.cn-shanghai.fcapp.run",
+            AnyRouterRegion::Fallback => "anyrouter.top",
+        }
+    }
 }
 
 /// AnyRouter AI provider template
@@ -85,6 +92,10 @@ impl Template for AnyRouterTemplate {
 
     fn description(&self) -> &'static str {
         self.region.description()
+    }
+
+    fn api_host(&self) -> Option<&'static str> {
+        Some(self.region.api_host())
     }
 
     fn has_variants(&self) -> bool {

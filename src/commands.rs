@@ -1,5 +1,5 @@
 use crate::{
-    Configurable, CredentialManager, cli,
+    Configurable, CredentialManager, claude_cli, cli,
     credentials::{CredentialStore, get_api_key_interactively},
     settings::{ClaudeSettings, format_settings_comparison, format_settings_for_display},
     snapshots::{self, SnapshotScope, SnapshotStore},
@@ -283,6 +283,30 @@ fn apply_template_command(
 
     // Save settings (replace mode - no merging)
     settings.to_file(settings_path)?;
+
+    // Patch Claude CLI with the template's API host
+    if let Some(api_host) = template_instance.api_host() {
+        match claude_cli::patch_claude_cli_with_host(api_host, false) {
+            Ok(true) => {
+                println!(
+                    "{} Patched Claude CLI to use host: {}",
+                    style("✓").green().bold(),
+                    style(api_host).cyan()
+                );
+            }
+            Ok(false) => {
+                // CLI already patched or not found - this is fine
+            }
+            Err(e) => {
+                // Don't fail the whole operation, just warn
+                eprintln!(
+                    "{} Failed to patch Claude CLI: {}",
+                    style("⚠").yellow().bold(),
+                    e
+                );
+            }
+        }
+    }
 
     println!(
         "{} Applied template '{}' successfully!",

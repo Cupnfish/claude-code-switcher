@@ -28,6 +28,10 @@ impl Template for FishtripTemplate {
         "Fishtrip API - Anthropic-compatible endpoint"
     }
 
+    fn api_host(&self) -> Option<&'static str> {
+        Some("api.fishtrip.net")
+    }
+
     fn create_settings(&self, api_key: &str, scope: &SnapshotScope) -> ClaudeSettings {
         let mut settings = ClaudeSettings::new();
 
@@ -63,10 +67,7 @@ impl Template for FishtripTemplate {
                 "ANTHROPIC_BASE_URL".to_string(),
                 "https://api.fishtrip.net".to_string(),
             );
-            env.insert(
-                "ANTHROPIC_MODEL".to_string(),
-                "claude-opus-4-6".to_string(),
-            );
+            env.insert("ANTHROPIC_MODEL".to_string(), "claude-opus-4-6".to_string());
             env.insert(
                 "ANTHROPIC_SMALL_FAST_MODEL".to_string(),
                 "claude-opus-4-6".to_string(),

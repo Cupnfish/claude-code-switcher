@@ -63,6 +63,13 @@ impl ZaiRegion {
             ZaiRegion::International => "https://console.z.ai/apikeys",
         }
     }
+
+    pub fn api_host(&self) -> &'static str {
+        match self {
+            ZaiRegion::China => "open.bigmodel.cn",
+            ZaiRegion::International => "api.z.ai",
+        }
+    }
 }
 
 /// ZAI (GLM/Zhipu) AI provider template
@@ -109,6 +116,10 @@ impl Template for ZaiTemplate {
 
     fn api_key_url(&self) -> Option<&'static str> {
         Some(self.region.api_key_url())
+    }
+
+    fn api_host(&self) -> Option<&'static str> {
+        Some(self.region.api_host())
     }
 
     fn has_variants(&self) -> bool {
