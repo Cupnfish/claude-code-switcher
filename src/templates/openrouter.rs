@@ -180,7 +180,7 @@ impl Template for OpenRouterTemplate {
     }
 
     fn env_var_names(&self) -> Vec<&'static str> {
-        vec!["OPENROUTER_API_KEY", "ANTHROPIC_AUTH_TOKEN"]
+        vec!["OPENROUTER_API_KEY"]
     }
 
     fn display_name(&self) -> &'static str {
@@ -253,6 +253,7 @@ impl Template for OpenRouterTemplate {
                 "https://openrouter.ai/api".to_string(),
             );
             env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.to_string());
+            // ANTHROPIC_API_KEY must be empty to allow interactive model selection
             env.insert("ANTHROPIC_API_KEY".to_string(), "".to_string());
             env.insert("ANTHROPIC_MODEL".to_string(), self.model_id.clone());
             env.insert(
