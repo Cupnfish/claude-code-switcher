@@ -67,11 +67,10 @@ pub fn find_claude_cli() -> Result<PathBuf> {
 /// Find an executable in PATH
 fn which_in_path(name: &str) -> Option<PathBuf> {
     // First, check if it's an absolute path or relative path that exists
-    if let Ok(current_exe) = env::current_exe() {
-        if current_exe.file_name()?.to_str()? == name {
+    if let Ok(current_exe) = env::current_exe()
+        && current_exe.file_name()?.to_str()? == name {
             return Some(current_exe);
         }
-    }
 
     // Check PATH environment variable
     let path_var = env::var("PATH").ok()?;
@@ -149,14 +148,12 @@ fn extract_path_from_line(line: &str, wrapper_path: &PathBuf) -> Option<PathBuf>
     if line.contains("$basedir") {
         // Extract the relative path after $basedir
         if let Ok(re) = Regex::new(r#"\$basedir/(node_modules/@anthropic-ai/claude-code/cli\.js)"#)
-        {
-            if let Some(caps) = re.captures(line) {
+            && let Some(caps) = re.captures(line) {
                 let relative_path = caps.get(1)?.as_str();
                 // Get the directory containing the wrapper script
                 let wrapper_dir = wrapper_path.parent()?;
                 return Some(wrapper_dir.join(relative_path));
             }
-        }
     }
 
     // Format 2: "$(dirname "$0")/node_modules/..." (common in shell scripts)
@@ -174,14 +171,12 @@ fn extract_path_from_line(line: &str, wrapper_path: &PathBuf) -> Option<PathBuf>
         // Try to extract a quoted path
         if let Ok(re) =
             Regex::new(r#"["']([^"']*node_modules/@anthropic-ai/claude-code/cli\.js)["']"#)
-        {
-            if let Some(caps) = re.captures(line) {
+            && let Some(caps) = re.captures(line) {
                 let path_str = caps.get(1)?.as_str();
                 // Handle Windows environment variables like %APPDATA%
                 let expanded = expand_env_vars(path_str);
                 return Some(PathBuf::from(expanded));
             }
-        }
     }
 
     // Format 4: Windows cmd format with %~dp0

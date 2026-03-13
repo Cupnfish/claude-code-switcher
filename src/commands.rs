@@ -155,7 +155,8 @@ fn apply_template_command(
         && ((target == "kat-coder" || target == "katcoder" || target == "kat")
             || (target == "kimi")
             || (target == "zai" || target == "glm" || target == "zhipu")
-            || (target == "anyrouter" || target == "anyr" || target == "ar"))
+            || (target == "anyrouter" || target == "anyr" || target == "ar")
+            || (target == "openrouter" || target == "or"))
     {
         // Use template's interactive creation method
         match template_type {
@@ -176,6 +177,12 @@ fn apply_template_command(
                 let anyrouter_template =
                     crate::templates::anyrouter::AnyRouterTemplate::create_interactively()?;
                 Box::new(anyrouter_template) as Box<dyn Template>
+            }
+            crate::templates::TemplateType::OpenRouter => {
+                let openrouter_template =
+                    crate::templates::openrouter::OpenRouterTemplate::create_with_model_selection(
+                    )?;
+                Box::new(openrouter_template) as Box<dyn Template>
             }
             _ => initial_template,
         }

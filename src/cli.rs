@@ -21,7 +21,7 @@ pub enum Commands {
     /// Apply a snapshot or template [alias: a]
     #[command(alias = "a")]
     Apply {
-        /// Snapshot name or template type (deepseek, glm, k2, k2-thinking, kat-coder-pro, kat-coder-air, kat-coder, kimi, longcat, fishtrip, fish, minimax, seed-code, zenmux, anyrouter)
+        /// Snapshot name or template type (deepseek, glm, k2, k2-thinking, kat-coder-pro, kat-coder-air, kat-coder, kimi, longcat, fishtrip, fish, minimax, seed-code, zenmux, anyrouter, openrouter)
         target: String,
 
         /// What to include in the snapshot (default: common)
