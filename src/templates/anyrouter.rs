@@ -42,11 +42,11 @@ impl AnyRouterRegion {
     }
 
     pub fn model_name(&self) -> &'static str {
-        "claude-opus-4-6"
+        "opus[1m]"
     }
 
     pub fn small_fast_model(&self) -> &'static str {
-        "claude-opus-4-6"
+        "opus[1m]"
     }
 
     pub fn api_host(&self) -> &'static str {
