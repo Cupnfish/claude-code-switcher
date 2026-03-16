@@ -10,7 +10,26 @@ use crate::{
 };
 use anyhow::{Result, anyhow};
 use console::style;
+use std::collections::HashMap;
 use std::path::PathBuf;
+
+/// Common environment variables that should be added to all templates
+fn get_common_env_vars() -> HashMap<String, String> {
+    let mut env = HashMap::new();
+    env.insert("ENABLE_TOOL_SEARCH".to_string(), "true".to_string());
+    env
+}
+
+/// Inject common environment variables into settings
+fn inject_common_env_vars(settings: &mut ClaudeSettings) {
+    if let Some(ref mut env) = settings.env {
+        for (key, value) in get_common_env_vars() {
+            env.insert(key, value);
+        }
+    } else {
+        settings.env = Some(get_common_env_vars());
+    }
+}
 
 /// Run a command based on CLI arguments
 pub fn run_command(args: &crate::Cli) -> Result<()> {
@@ -248,6 +267,9 @@ fn apply_template_command(
     };
 
     let mut settings = template_instance.create_settings(&api_key, scope);
+
+    // Inject common environment variables
+    inject_common_env_vars(&mut settings);
 
     // Override model if specified
     if let Some(model_name) = model {

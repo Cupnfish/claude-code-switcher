@@ -225,7 +225,6 @@ impl Template for ZaiTemplate {
                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),
                 "1".to_string(),
             );
-            env.insert("ENABLE_TOOL_SEARCH".to_string(), "true".to_string());
             settings.env = Some(env);
         }
 

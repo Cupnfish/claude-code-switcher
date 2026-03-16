@@ -96,7 +96,6 @@ impl Template for ZenmuxTemplate {
                 "ANTHROPIC_SMALL_FAST_MODEL".to_string(),
                 "google/gemini-3-pro-preview-free".to_string(),
             );
-            env.insert("ENABLE_TOOL_SEARCH".to_string(), "true".to_string());
             settings.env = Some(env);
         }
 
