@@ -76,6 +76,7 @@ impl Template for DuojieTemplate {
                 "claude-opus-4-6-kiro".to_string(),
             );
             env.insert("API_TIMEOUT_MS".to_string(), "600000".to_string());
+            env.insert("ENABLE_TOOL_SEARCH".to_string(), "true".to_string());
             settings.env = Some(env);
         }
 

@@ -188,6 +188,7 @@ impl Template for AnyRouterTemplate {
                 "ANTHROPIC_SMALL_FAST_MODEL".to_string(),
                 self.region.small_fast_model().to_string(),
             );
+            env.insert("ENABLE_TOOL_SEARCH".to_string(), "true".to_string());
             settings.env = Some(env);
         }
 
