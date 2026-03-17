@@ -179,7 +179,7 @@ impl Template for AnyRouterTemplate {
                 "ANTHROPIC_BASE_URL".to_string(),
                 self.region.base_url().to_string(),
             );
-            env.insert("ANYROUTER_AUTH_TOKEN".to_string(), api_key.to_string());
+            env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.to_string());
             env.insert(
                 "ANTHROPIC_MODEL".to_string(),
                 self.region.model_name().to_string(),
