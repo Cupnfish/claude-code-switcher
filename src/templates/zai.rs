@@ -45,8 +45,8 @@ impl ZaiRegion {
 
     pub fn model_name(&self) -> &'static str {
         match self {
-            ZaiRegion::China => "glm-5",
-            ZaiRegion::International => "glm-5",
+            ZaiRegion::China => "glm-5-turbo",
+            ZaiRegion::International => "glm-5-turbo",
         }
     }
 
