@@ -488,36 +488,35 @@ impl CredentialSelector {
 
         let credential = &self.credentials[index];
 
-        println!("Rename credential: {}", credential.name());
-        println!("Press Enter without typing to cancel, or enter a new name:");
-
-        let mut new_name = String::new();
-        io::stdin()
-            .read_line(&mut new_name)
-            .map_err(SelectorError::Io)?;
+        let new_name = inquire::Text::new(&format!("Rename '{}':", credential.name()))
+            .with_help_message("Enter new name, Esc to cancel")
+            .prompt()
+            .map_err(|e| {
+                let msg = e.to_string();
+                if msg.contains("canceled") || msg.contains("cancelled") {
+                    SelectorError::Cancelled
+                } else {
+                    SelectorError::Failed(format!("Input failed: {}", e))
+                }
+            })?;
 
         let new_name = new_name.trim().to_string();
 
         if new_name.is_empty() {
             println!("Rename cancelled.");
-            return Ok(Some(true)); // Continue to main loop
-        }
-
-        if new_name == credential.name() {
-            println!("ℹ️  Name unchanged.");
             return Ok(Some(true));
         }
 
-        if new_name.trim().is_empty() {
-            println!("❌ Name cannot be empty.");
-            return Ok(Some(true)); // Continue to main loop
+        if new_name == credential.name() {
+            println!("Name unchanged.");
+            return Ok(Some(true));
         }
 
         // Confirm the rename action
         let confirmation = ConfirmationService::confirm_action(&format!(
             "Rename '{}' to '{}'",
             credential.name(),
-            new_name.trim()
+            new_name
         ))?;
 
         if confirmation {
@@ -525,14 +524,14 @@ impl CredentialSelector {
                 SelectorError::Storage(format!("Failed to create credential store: {}", e))
             })?;
             store
-                .update_name(credential.id(), new_name.trim().to_string())
+                .update_name(credential.id(), new_name.clone())
                 .map_err(|e| {
                     SelectorError::OperationFailed(format!("Failed to rename credential: {}", e))
                 })?;
 
             // Update local list
             if let Some(cred) = self.credentials.get_mut(index) {
-                cred.name = new_name.trim().to_string();
+                cred.name = new_name;
                 cred.update_timestamp();
             }
 
@@ -540,7 +539,7 @@ impl CredentialSelector {
             Ok(Some(true))
         } else {
             println!("Rename cancelled.");
-            Ok(Some(true)) // Continue to main loop
+            Ok(Some(true))
         }
     }
 }

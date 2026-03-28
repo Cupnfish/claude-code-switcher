@@ -28,13 +28,13 @@ Claude Code Switcher (`ccs`) 是一个专为 Claude Code 设计的 CLI 工具，
 
 | 特性 | 说明 |
 |------|------|
-| 🔄 **一键切换** | 无需手动编辑，一条命令完成 AI 提供商切换 |
-| 📦 **预设模板** | 内置 9+ 热门 AI 提供商，开箱即用 |
-| 💾 **快照系统** | 保存自定义配置，随时一键恢复 |
-| 🔐 **安全存储** | API 密钥本地加密存储，支持多凭证管理 |
-| 🎨 **统一交互** | VSCode 风格的命令面板，操作直观流畅 |
-| 🌍 **环境隔离** | 项目级和全局配置独立存储，互不干扰 |
-| 🧩 **模块设计** | 清晰的代码架构，易于扩展新提供商 |
+| **一键切换** | 无需手动编辑，一条命令完成 AI 提供商切换 |
+| **预设模板** | 内置 12+ 热门 AI 提供商，开箱即用 |
+| **快照系统** | 保存自定义配置，随时一键恢复 |
+| **安全存储** | API 密钥本地加密存储，支持多凭证管理 |
+| **交互式 TUI** | 全屏交互式浏览器，支持键盘快捷键操作 |
+| **环境隔离** | 项目级和全局配置独立存储，互不干扰 |
+| **模块设计** | 清晰的代码架构，易于扩展新提供商 |
 
 ---
 
@@ -88,11 +88,11 @@ ccs --help
 ### 应用预设模板
 
 ```bash
-# 智谱 GLM-5（推荐）- Coding 能力对齐 Claude Opus 4.6，支持 200K 上下文
+# 智谱 GLM-5.1（推荐）- Coding 能力对齐 Claude Opus 4.6，支持 200K 上下文
 ccs apply zai
 # 别名：glm, zhipu
 
-# MiniMax M2.5 - Anthropic 兼容，高性能 AI
+# MiniMax - Anthropic 兼容，高性能 AI
 ccs apply minimax
 
 # DeepSeek - 价格优惠，响应快速
@@ -103,16 +103,29 @@ ccs apply deepseek
 ccs apply fishtrip
 # 别名：fish
 
-# Kimi For Coding - 专注编程场景
+# Kimi - 专注编程场景（支持 K2、K2 Thinking 等服务）
 ccs apply kimi
 
-# KatCoder Pro - 专业编程 AI
-ccs apply kat-coder-pro
-# 别名：katpro
+# KatCoder - 支持 Pro/Air 两种规格
+ccs apply kat-coder
 
-# KatCoder Air - 轻量级快速响应
-ccs apply kat-coder-air
-# 别名：katair
+# SeedCode - 字节跳动编程模型
+ccs apply seed-code
+
+# Duojie - 多提供商聚合
+ccs apply duojie
+# 别名：dj
+
+# Zenmux - 多提供商路由
+ccs apply zenmux
+
+# AnyRouter - 智能路由配置
+ccs apply anyrouter
+# 别名：anyr, ar
+
+# OpenRouter - 开放模型选择
+ccs apply openrouter
+# 别名：or
 ```
 
 > **首次使用**：工具会提示输入 API 密钥，可选择保存到本地以便后续自动使用。
@@ -123,13 +136,18 @@ ccs apply kat-coder-air
 
 | 提供商 | 命令 | 别名 | 特点 | 推荐度 |
 |--------|--------|------|------|--------|
-| 🌟 **智谱 GLM** | `ccs apply zai` | `glm`, `zhipu` | GLM-5，200K 上下文，128K 输出，Coding 对齐 Claude Opus 4.6 | ⭐⭐⭐⭐⭐ |
-| 🔥 **MiniMax** | `ccs apply minimax` | - | M2.5 模型，Anthropic 兼容 | ⭐⭐⭐⭐ |
-| 🚀 **DeepSeek** | `ccs apply deepseek` | `ds` | 价格优惠，响应快速 | ⭐⭐⭐⭐ |
-| 🐟 **Fishtrip** | `ccs apply fishtrip` | `fish` | Anthropic 兼容网关 | ⭐⭐⭐ |
-| 🎯 **Kimi** | `ccs apply kimi` | - | 专注编程，响应快速 | ⭐⭐⭐ |
-| 🔧 **KatCoder Pro** | `ccs apply kat-coder-pro` | `katpro` | 专业编程 AI | ⭐⭐⭐ |
-| 💨 **KatCoder Air** | `ccs apply kat-coder-air` | `katair` | 轻量级快速响应 | ⭐⭐ |
+| **智谱 GLM** | `ccs apply zai` | `glm`, `zhipu` | GLM-5.1，200K 上下文，128K 输出，Coding 对齐 Claude Opus 4.6 | ⭐⭐⭐⭐⭐ |
+| **MiniMax** | `ccs apply minimax` | - | Anthropic 兼容，支持中国区/国际区 | ⭐⭐⭐⭐ |
+| **DeepSeek** | `ccs apply deepseek` | `ds` | 价格优惠，响应快速 | ⭐⭐⭐⭐ |
+| **OpenRouter** | `ccs apply openrouter` | `or` | 开放模型选择，支持多种模型 | ⭐⭐⭐⭐ |
+| **AnyRouter** | `ccs apply anyrouter` | `anyr`, `ar` | 智能路由，支持中国区/Fallback | ⭐⭐⭐⭐ |
+| **SeedCode** | `ccs apply seed-code` | `seedcode` | 字节跳动编程模型 | ⭐⭐⭐ |
+| **Fishtrip** | `ccs apply fishtrip` | `fish` | Anthropic 兼容网关 | ⭐⭐⭐ |
+| **Kimi** | `ccs apply kimi` | `k2`, `moonshot` | 统一 Moonshot 服务（K2, K2 Thinking, Kimi For Coding） | ⭐⭐⭐ |
+| **KatCoder** | `ccs apply kat-coder` | `kat` | 支持 Pro/Air 两种规格 | ⭐⭐⭐ |
+| **Duojie** | `ccs apply duojie` | `dj` | 多提供商聚合 | ⭐⭐⭐ |
+| **Zenmux** | `ccs apply zenmux` | - | 多提供商路由 | ⭐⭐⭐ |
+| **Longcat** | `ccs apply longcat` | - | LongCat 聊天配置 | ⭐⭐ |
 
 ---
 
@@ -140,39 +158,34 @@ ccs apply kat-coder-air
 | 命令 | 别名 | 说明 |
 |------|------|------|
 | `ccs apply <target>` | `a` | 应用模板或快照 |
-| `ccs snap <name>` | `s` | 创建快照 |
-| `ccs ls` | `list` | 列出所有快照 |
-| `ccs delete <name>` | `rm`, `del` | 删除指定快照 |
+| `ccs ls` | `list`, `l` | 交互式快照浏览器（创建、应用、删除快照） |
+| `ccs creds list` | `ccs creds ls` | 交互式凭证浏览器 |
+
+### 快照管理
+
+快照管理通过交互式 TUI 浏览器完成：
+
+```bash
+# 打开快照浏览器
+ccs ls
+```
+
+在交互式界面中可以：
+- 浏览所有快照
+- 创建新快照
+- 应用快照
+- 删除快照
 
 ### 凭证管理
 
 ```bash
-# 列出所有保存的凭证
+# 打开凭证浏览器（交互式管理）
 ccs credentials list
 # 或简写
 ccs creds list
 
-# 删除指定凭证（通过 ID）
-ccs credentials delete <credential-id>
-
 # 清除所有凭证
 ccs credentials clear
-```
-
-### 快照管理
-
-```bash
-# 创建快照
-ccs snap my-debug-config
-
-# 查看快照列表（含详情）
-ccs ls -v
-
-# 应用快照
-ccs apply my-debug-config
-
-# 删除快照
-ccs delete my-debug-config
 ```
 
 ---
@@ -185,10 +198,10 @@ ccs delete my-debug-config
 # 仅应用环境变量
 ccs apply zai --scope env
 
-# 仅应用常用设置（模型、权限等）
+# 仅应用常用设置（模型、权限等）- 默认
 ccs apply zai --scope common
 
-# 应用完整配置（默认行为）
+# 应用完整配置
 ccs apply zai --scope all
 ```
 
@@ -201,21 +214,11 @@ ccs apply zai --backup
 # 跳过确认提示
 ccs apply zai --yes
 
+# 覆盖模型设置
+ccs apply deepseek --model "claude-3-5-sonnet-20241022"
+
 # 指定配置文件路径
 ccs apply zai --settings-path ~/.claude/settings.json
-```
-
-### 高级快照
-
-```bash
-# 指定作用域创建快照
-ccs snap my-env --scope env
-
-# 添加描述
-ccs snap my-config --description "开发环境配置"
-
-# 从自定义配置文件创建
-ccs snap my-custom --settings-path /path/to/settings.json
 ```
 
 ---
@@ -283,21 +286,33 @@ cargo fmt --check
 ```
 src/
 ├── main.rs          # 入口点和核心 trait
-├── cli.rs          # CLI 参数解析
-├── commands.rs     # 命令实现
-├── settings.rs     # 配置模型
-├── snapshots.rs    # 快照系统
-├── credentials.rs  # 凭证管理
-├── selectors/      # 统一选择器框架
-│   ├── base.rs     # 核心 trait 和实现
-│   ├── navigation.rs # 导航管理
-│   ├── confirmation.rs # 确认对话框
-│   └── ...         # 各类选择器
-├── templates/      # AI 提供商模板
-│   ├── mod.rs      # Template trait 定义
-│   ├── zai.rs      # 智谱 GLM
-│   └── ...         # 其他提供商
-└── utils.rs        # 工具函数
+├── cli.rs           # CLI 参数解析
+├── commands.rs      # 命令实现
+├── settings.rs      # 配置模型
+├── snapshots.rs     # 快照系统
+├── credentials.rs   # 凭证管理
+├── utils.rs         # 工具函数
+├── selectors/       # 交互式选择器框架
+│   ├── base.rs      # 核心 trait 和实现
+│   ├── confirmation.rs # 确认服务
+│   ├── error.rs     # 选择器错误类型
+│   ├── snapshot.rs  # 快照选择器（TUI）
+│   ├── credential.rs # 凭证选择器（TUI）
+│   └── template.rs  # 模板选择器
+├── templates/       # AI 提供商模板
+│   ├── mod.rs       # Template trait 定义与注册
+│   ├── zai.rs       # 智谱 GLM
+│   ├── deepseek.rs  # DeepSeek
+│   ├── minimax.rs   # MiniMax
+│   ├── kimi.rs      # Kimi/Moonshot
+│   ├── kat_coder.rs # KatCoder
+│   ├── fishtrip.rs  # Fishtrip
+│   ├── longcat.rs   # Longcat
+│   ├── seed_code.rs # SeedCode
+│   ├── zenmux.rs    # Zenmux
+│   ├── duojie.rs    # Duojie
+│   ├── anyrouter.rs # AnyRouter
+│   └── openrouter.rs # OpenRouter
 ```
 
 ---

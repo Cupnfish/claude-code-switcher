@@ -119,15 +119,6 @@ impl InputState {
         }
     }
 
-    fn from_content(content: String) -> Self {
-        let grapheme_count = content.graphemes(true).count();
-        Self {
-            content,
-            grapheme_count,
-            cursor_grapheme_idx: grapheme_count,
-        }
-    }
-
     fn insert_char(&mut self, c: char) {
         let graphemes: Vec<&str> = self.content.graphemes(true).collect();
         let mut new_content = String::new();
@@ -815,25 +806,6 @@ impl<'a, T: SelectableItem + Clone> Selector<'a, T> {
         Ok(())
     }
 
-    /// Get current selector state for saving
-    pub fn get_state(&self) -> SelectorState<T> {
-        // Note: This would need to be called from within the prompt method
-        // For now, we'll create a default state
-        SelectorState {
-            cursor_index: self.starting_cursor,
-            scroll_offset: 0,
-            filter_text: String::new(),
-            filtered_items: self.items.clone(),
-            input_state: InputState::new(),
-        }
-    }
-
-    /// Restore selector state from saved state
-    pub fn restore_state(&mut self, state: SelectorState<T>) {
-        // Note: This would need to be integrated into the prompt method
-        // For now, we'll update the starting cursor position
-        self.starting_cursor = state.cursor_index;
-    }
 }
 
 #[derive(Clone)]
@@ -851,241 +823,33 @@ enum KeyHandleResult<T> {
     Refresh,
 }
 
-// Implement SelectableItem for String to enable simple string selections
-impl SelectableItem for String {
-    fn display_name(&self) -> String {
-        self.clone()
-    }
-
-    fn format_for_list(&self) -> String {
-        self.clone()
-    }
-
-    fn id(&self) -> Option<String> {
-        Some(self.clone())
-    }
-}
-
-/// Base implementation for simple selectors
-pub struct BaseSelector<T: SelectableItem> {
-    items: Vec<T>,
-    title: String,
-    allow_create: bool,
-    show_filter: bool, // Added to support hiding filter
-    saved_state: Option<SelectorState<T>>,
-}
-
-impl<T: SelectableItem + Clone> BaseSelector<T> {
-    pub fn new(items: Vec<T>, title: &str) -> Self {
-        Self {
-            items,
-            title: title.to_string(),
-            allow_create: false,
-            show_filter: true, // Default to showing filter for backward compatibility
-            saved_state: None,
-        }
-    }
-
-    pub fn with_show_filter(mut self, show_filter: bool) -> Self {
-        self.show_filter = show_filter;
-        self
-    }
-
-    pub fn with_create(mut self, allow_create: bool) -> Self {
-        self.allow_create = allow_create;
-        self
-    }
-
-    pub fn run(&mut self) -> crate::selectors::error::SelectorResult<Option<T>> {
-        let config = SelectorConfig {
-            allow_create: self.allow_create,
-            show_filter: self.show_filter, // Use the show_filter setting
-            ..SelectorConfig::default()
-        };
-
-        let mut selector = Selector::new(&self.title, self.items.clone()).with_config(config);
-
-        // Set starting position from saved state
-        if let Some(ref saved_state) = self.saved_state {
-            selector.restore_state(saved_state.clone());
-        }
-
-        match selector.prompt()? {
-            SelectionResult::Selected(item) | SelectionResult::ViewDetails(item) => Ok(Some(item)),
-            SelectionResult::Create => self.handle_create(),
-            SelectionResult::CustomInput(input) => self.handle_custom_input(input),
-            SelectionResult::Delete(item) => self.handle_delete(item),
-            SelectionResult::Rename(item) => self.handle_rename(item),
-            SelectionResult::Refresh => self.handle_refresh(),
-            SelectionResult::Back => {
-                // Clear saved state when going back from main menu
-                self.saved_state = None;
-                Ok(None)
-            }
-            SelectionResult::Exit => {
-                println!("🚫 Operation cancelled by user.");
-                std::process::exit(0);
-            }
-        }
-    }
-
-    fn handle_create(&self) -> crate::selectors::error::SelectorResult<Option<T>> {
-        Err(SelectorError::OperationFailed(
-            "Create operation not implemented".to_string(),
-        ))
-    }
-
-    fn handle_custom_input(
-        &self,
-        _input: String,
-    ) -> crate::selectors::error::SelectorResult<Option<T>> {
-        Err(SelectorError::OperationFailed(
-            "Custom input not supported".to_string(),
-        ))
-    }
-
-    fn handle_delete(&self, _item: T) -> crate::selectors::error::SelectorResult<Option<T>> {
-        Err(SelectorError::OperationFailed(
-            "Delete operation not implemented".to_string(),
-        ))
-    }
-
-    fn handle_rename(&self, _item: T) -> crate::selectors::error::SelectorResult<Option<T>> {
-        Err(SelectorError::OperationFailed(
-            "Rename operation not implemented".to_string(),
-        ))
-    }
-
-    fn handle_refresh(&self) -> crate::selectors::error::SelectorResult<Option<T>> {
-        Err(SelectorError::OperationFailed(
-            "Refresh operation not implemented".to_string(),
-        ))
-    }
-
-    /// Show item details in a secondary interface using list-like UI without filter
-    pub fn show_item_details(
-        item: &T,
-        title: &str,
-    ) -> crate::selectors::error::SelectorResult<SelectionResult<T>>
-    where
-        T: SelectableItem + Clone,
-    {
-        // Create a config without filter
-        let config = SelectorConfig {
-            show_filter: false,
-            allow_create: false,
-            allow_custom: false,
-            ..SelectorConfig::default()
-        };
-
-        // Create a selector with just the item itself
-        let mut selector = Selector::new(title, vec![item.clone()]).with_config(config);
-
-        // Run the selector
-        let result = selector.prompt()?;
-
-        // Map the result
-        match result {
-            SelectionResult::Selected(selected_item) => {
-                Ok(SelectionResult::Selected(selected_item))
-            }
-            SelectionResult::Rename(rename_item) => Ok(SelectionResult::Rename(rename_item)),
-            SelectionResult::Delete(delete_item) => Ok(SelectionResult::Delete(delete_item)),
-            SelectionResult::Back => Ok(SelectionResult::Back),
-            _ => Ok(SelectionResult::Back),
-        }
-    }
-}
-
 /// Prompt user for a new name for an item
 pub fn prompt_rename(
     current_name: &str,
     item_type: &str,
 ) -> crate::selectors::error::SelectorResult<String> {
-    // Setup terminal for input
-    let _ = terminal::enable_raw_mode();
-    let mut stdout = stdout();
-
-    // Clear screen and show prompt
-    stdout.queue(Clear(ClearType::All))?;
-    stdout.queue(MoveTo(0, 0))?;
-
-    stdout
-        .execute(SetForegroundColor(Color::Cyan))?
-        .execute(Print(format!("✏️  Rename {}:", item_type)))?
-        .execute(ResetColor)?
-        .execute(Print(format!("  Current: {}", current_name)))?;
-
-    let mut input_state = InputState::from_content(current_name.to_string());
-    let cursor_pos = "  New name: ".to_string();
-
-    stdout.execute(Print(&cursor_pos))?;
-
-    // Main input loop
-    loop {
-        if let Event::Key(key_event) = read()? {
-            match key_event.code {
-                KeyCode::Enter => {
-                    let new_name = input_state.content().trim();
-                    if new_name.is_empty() {
-                        // Show error
-                        stdout.queue(MoveTo(0, 3))?;
-                        stdout
-                            .execute(SetForegroundColor(Color::Red))?
-                            .execute(Print("❌ Name cannot be empty"))?
-                            .execute(ResetColor)?;
-                        continue;
-                    }
-                    if new_name == current_name {
-                        // Show unchanged message
-                        stdout.queue(MoveTo(0, 3))?;
-                        stdout
-                            .execute(SetForegroundColor(Color::Yellow))?
-                            .execute(Print("ℹ️  Name unchanged"))?
-                            .execute(ResetColor)?;
-                        std::thread::sleep(std::time::Duration::from_millis(1000));
-                        return Ok(new_name.to_string());
-                    }
-                    return Ok(new_name.to_string());
-                }
-                KeyCode::Esc => {
-                    stdout.execute(Clear(ClearType::All))?;
-                    return Err(SelectorError::Cancelled);
-                }
-                KeyCode::Char(c) => {
-                    input_state.insert_char(c);
-                    // Redraw the input
-                    stdout.queue(MoveTo(cursor_pos.len() as u16, 1))?;
-                    stdout.queue(Clear(ClearType::UntilNewLine))?;
-                    stdout.queue(Print(&input_state.content()))?;
-                }
-                KeyCode::Backspace => {
-                    input_state.backspace();
-                    // Redraw the input
-                    stdout.queue(MoveTo(cursor_pos.len() as u16, 1))?;
-                    stdout.queue(Clear(ClearType::UntilNewLine))?;
-                    stdout.queue(Print(&input_state.content()))?;
-                }
-                KeyCode::Delete => {
-                    input_state.delete_char();
-                    // Redraw the input
-                    stdout.queue(MoveTo(cursor_pos.len() as u16, 1))?;
-                    stdout.queue(Clear(ClearType::UntilNewLine))?;
-                    stdout.queue(Print(&input_state.content()))?;
-                }
-                KeyCode::Left => {
-                    input_state.move_cursor_left();
-                    let cursor_col = cursor_pos.len() + input_state.pre_cursor_width();
-                    stdout.queue(MoveTo(cursor_col as u16, 1))?;
-                }
-                KeyCode::Right => {
-                    input_state.move_cursor_right();
-                    let cursor_col = cursor_pos.len() + input_state.pre_cursor_width();
-                    stdout.queue(MoveTo(cursor_col as u16, 1))?;
-                }
-                _ => {}
+    let new_name = inquire::Text::new(&format!("Rename {}:", item_type))
+        .with_default(current_name)
+        .with_help_message("Enter new name, Esc to cancel")
+        .prompt()
+        .map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("canceled") || msg.contains("cancelled") {
+                SelectorError::Cancelled
+            } else {
+                SelectorError::Failed(format!("Input failed: {}", e))
             }
-        }
-        stdout.flush()?;
+        })?;
+
+    let trimmed = new_name.trim().to_string();
+    if trimmed.is_empty() {
+        Err(SelectorError::InvalidInput(
+            "Name cannot be empty".to_string(),
+        ))
+    } else if trimmed == current_name {
+        println!("Name unchanged.");
+        Ok(trimmed)
+    } else {
+        Ok(trimmed)
     }
 }

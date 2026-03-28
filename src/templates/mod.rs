@@ -281,6 +281,45 @@ pub fn get_template_instance(template_type: &TemplateType) -> Box<dyn Template> 
     get_template_instance_with_input(template_type, "")
 }
 
+/// Resolve a template instance, prompting for variant selection if needed
+pub fn resolve_template_interactive(
+    template_type: &TemplateType,
+    target: &str,
+) -> Result<Box<dyn Template>> {
+    let initial = get_template_instance_with_input(template_type, target);
+
+    // If no variants or target specifies a particular variant, use as-is
+    if !initial.has_variants() || !is_generic_target(target) {
+        return Ok(initial);
+    }
+
+    // Generic target with variants - prompt for selection
+    match template_type {
+        TemplateType::KatCoder => Ok(Box::new(kat_coder::KatCoderTemplate::create_interactively()?)),
+        TemplateType::Kimi => Ok(Box::new(kimi::KimiTemplate::create_interactively()?)),
+        TemplateType::Zai => Ok(Box::new(zai::ZaiTemplate::create_interactively()?)),
+        TemplateType::AnyRouter => Ok(Box::new(
+            anyrouter::AnyRouterTemplate::create_interactively()?,
+        )),
+        TemplateType::OpenRouter => Ok(Box::new(
+            openrouter::OpenRouterTemplate::create_with_model_selection()?,
+        )),
+        _ => Ok(initial),
+    }
+}
+
+/// Check if target is a generic name (no specific variant specified)
+fn is_generic_target(target: &str) -> bool {
+    matches!(
+        target.to_lowercase().as_str(),
+        "kat-coder" | "katcoder" | "kat"
+            | "kimi"
+            | "zai" | "glm" | "zhipu"
+            | "anyrouter" | "anyr" | "ar"
+            | "openrouter" | "or"
+    )
+}
+
 /// Legacy compatibility function - creates a settings function for backwards compatibility
 pub fn get_template(template_type: &TemplateType) -> fn(&str, &SnapshotScope) -> ClaudeSettings {
     match template_type {

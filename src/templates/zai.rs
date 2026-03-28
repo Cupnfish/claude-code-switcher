@@ -28,10 +28,10 @@ impl ZaiRegion {
     pub fn description(&self) -> &'static str {
         match self {
             ZaiRegion::China => {
-                "Zhipu AI GLM-5 in China - Coding aligned with Claude Opus 4.6, with thinking capabilities"
+                "Zhipu AI GLM-5.1 in China - Coding aligned with Claude Opus 4.6, with thinking capabilities"
             }
             ZaiRegion::International => {
-                "Zhipu AI GLM-5 International - Global access with optimized routing"
+                "Zhipu AI GLM-5.1 International - Global access with optimized routing"
             }
         }
     }
@@ -45,15 +45,15 @@ impl ZaiRegion {
 
     pub fn model_name(&self) -> &'static str {
         match self {
-            ZaiRegion::China => "glm-5-turbo",
-            ZaiRegion::International => "glm-5-turbo",
+            ZaiRegion::China => "glm-5.1",
+            ZaiRegion::International => "glm-5.1",
         }
     }
 
     pub fn small_fast_model(&self) -> &'static str {
         match self {
-            ZaiRegion::China => "glm-5",
-            ZaiRegion::International => "glm-5",
+            ZaiRegion::China => "glm-5.1",
+            ZaiRegion::International => "glm-5.1",
         }
     }
 

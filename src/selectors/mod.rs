@@ -6,7 +6,6 @@
 pub mod base;
 pub mod confirmation;
 pub mod error;
-pub mod navigation;
 
 // Concrete selector implementations
 pub mod credential;
@@ -17,4 +16,3 @@ pub mod template;
 pub use base::{SelectableItem, SelectionResult, Selector};
 pub use confirmation::ConfirmationService;
 pub use error::{SelectorError, SelectorResult};
-pub use navigation::{NavigationManager, NavigationResult};

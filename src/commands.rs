@@ -3,12 +3,12 @@ use crate::{
     credentials::{CredentialStore, get_api_key_interactively},
     settings::{ClaudeSettings, format_settings_comparison, format_settings_for_display},
     snapshots::{self, SnapshotScope, SnapshotStore},
-    templates::{Template, TemplateType, get_template_instance_with_input, get_template_type},
+    templates::{TemplateType, get_template_type, resolve_template_interactive},
     utils::{
         backup_settings, confirm_action, get_credentials_dir, get_settings_path, get_snapshots_dir,
     },
 };
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use console::style;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -166,105 +166,11 @@ fn apply_template_command(
     backup: bool,
     yes: bool,
 ) -> Result<()> {
-    // Get template instance with the original input to handle specific variants
-    let initial_template = get_template_instance_with_input(template_type, target);
+    // Resolve template instance (interactive variant selection if needed)
+    let template_instance = resolve_template_interactive(template_type, target)?;
 
-    // If template has variants and user didn't specify a specific one, let user choose interactively
-    let template_instance = if initial_template.has_variants()
-        && ((target == "kat-coder" || target == "katcoder" || target == "kat")
-            || (target == "kimi")
-            || (target == "zai" || target == "glm" || target == "zhipu")
-            || (target == "anyrouter" || target == "anyr" || target == "ar")
-            || (target == "openrouter" || target == "or"))
-    {
-        // Use template's interactive creation method
-        match template_type {
-            crate::templates::TemplateType::KatCoder => {
-                let kat_coder_template =
-                    crate::templates::kat_coder::KatCoderTemplate::create_interactively()?;
-                Box::new(kat_coder_template) as Box<dyn Template>
-            }
-            crate::templates::TemplateType::Kimi => {
-                let kimi_template = crate::templates::kimi::KimiTemplate::create_interactively()?;
-                Box::new(kimi_template) as Box<dyn Template>
-            }
-            crate::templates::TemplateType::Zai => {
-                let zai_template = crate::templates::zai::ZaiTemplate::create_interactively()?;
-                Box::new(zai_template) as Box<dyn Template>
-            }
-            crate::templates::TemplateType::AnyRouter => {
-                let anyrouter_template =
-                    crate::templates::anyrouter::AnyRouterTemplate::create_interactively()?;
-                Box::new(anyrouter_template) as Box<dyn Template>
-            }
-            crate::templates::TemplateType::OpenRouter => {
-                let openrouter_template =
-                    crate::templates::openrouter::OpenRouterTemplate::create_with_model_selection(
-                    )?;
-                Box::new(openrouter_template) as Box<dyn Template>
-            }
-            _ => initial_template,
-        }
-    } else {
-        initial_template
-    };
-
-    // Get API key using the new multi-env-var support
-    let api_key = {
-        let env_var_names = template_instance.env_var_names();
-        let mut env_vars_with_keys = Vec::new();
-
-        // Check each environment variable name in order
-        for env_var_name in &env_var_names {
-            if let Some(api_key) = std::env::var(env_var_name)
-                .ok()
-                .filter(|key| !key.trim().is_empty())
-            {
-                env_vars_with_keys.push((env_var_name, api_key));
-            }
-        }
-
-        // Let user choose between env var and custom API key if env var exists
-        if !env_vars_with_keys.is_empty() {
-            use inquire::Select;
-
-            let mut options = Vec::new();
-            for (env_var_name, _) in &env_vars_with_keys {
-                options.push(format!(
-                    "Use API key from environment variable {}",
-                    env_var_name
-                ));
-            }
-            options.push("Enter a custom API key".to_string());
-
-            let choice = Select::new("API key source:", options)
-                .prompt()
-                .map_err(|e| anyhow!("Failed to get API key source selection: {}", e))?;
-
-            // Find which env var was selected
-            let mut selected_api_key: Option<String> = None;
-            for (env_var_name, api_key) in &env_vars_with_keys {
-                if choice.contains(&format!(
-                    "Use API key from environment variable {}",
-                    env_var_name
-                )) {
-                    println!("✓ Using API key from environment variable {}", env_var_name);
-                    selected_api_key = Some(api_key.clone());
-                    break;
-                }
-            }
-
-            // Return the selected API key or get custom one
-            if let Some(api_key) = selected_api_key {
-                api_key
-            } else {
-                get_api_key_interactively(template_type.clone())?
-            }
-        } else {
-            // No env vars found, use interactive credential selector
-            get_api_key_interactively(template_type.clone())?
-        }
-    };
+    // Get API key (handles env vars, saved credentials, and interactive prompts)
+    let api_key = get_api_key_interactively(template_type.clone())?;
 
     let mut settings = template_instance.create_settings(&api_key, scope);
 

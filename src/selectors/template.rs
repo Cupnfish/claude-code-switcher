@@ -1,10 +1,6 @@
-//! Template selector using the unified selector framework
+//! Template selector for choosing AI provider templates
 
-use crate::selectors::{
-    base::SelectableItem,
-    error::{SelectorError, SelectorResult},
-    navigation::NavigationManager,
-};
+use crate::selectors::error::{SelectorError, SelectorResult};
 use crate::{
     credentials::CredentialStore,
     templates::{TemplateType, get_template_instance},
@@ -14,9 +10,9 @@ use crate::{
 pub struct TemplateSelector;
 
 impl TemplateSelector {
-    /// Select a template type
+    /// Select a template type from available options
     pub fn select_template() -> SelectorResult<TemplateType> {
-        let template_types = vec![
+        let template_types = [
             TemplateType::DeepSeek,
             TemplateType::Zai,
             TemplateType::KatCoder,
@@ -30,23 +26,17 @@ impl TemplateSelector {
             TemplateType::AnyRouter,
         ];
 
-        let items: Vec<TemplateItem> = template_types.into_iter().map(TemplateItem::new).collect();
+        let options: Vec<String> = template_types.iter().map(|t| t.to_string()).collect();
 
-        match NavigationManager::select_from_list(
-            &items,
-            "Select AI provider:",
-            false,
-            Some("↑/↓: Navigate, →: Select, ←/Esc: Back"),
-        )? {
-            crate::selectors::navigation::NavigationResult::Selected(item) => {
-                Ok(item.template_type)
-            }
-            crate::selectors::navigation::NavigationResult::Back
-            | crate::selectors::navigation::NavigationResult::Exit
-            | crate::selectors::navigation::NavigationResult::CreateNew => {
-                Err(SelectorError::Cancelled)
-            }
-        }
+        let selection = inquire::Select::new("Select AI provider:", options)
+            .with_help_message("↑/↓: Navigate, Enter: Select, Esc: Cancel")
+            .prompt()
+            .map_err(inquire_to_selector_error)?;
+
+        template_types
+            .into_iter()
+            .find(|t| t.to_string() == selection)
+            .ok_or(SelectorError::NotFound)
     }
 
     /// Get API key for a template type
@@ -54,147 +44,81 @@ impl TemplateSelector {
         crate::selectors::credential::CredentialSelector::select_api_key(template_type)
     }
 
-    /// Get endpoint ID for template types that require it
+    /// Get endpoint ID for templates that require it
     pub fn get_endpoint_id_for_template(
         template_type: &TemplateType,
     ) -> SelectorResult<Option<String>> {
         let template_instance = get_template_instance(template_type);
 
-        // Only some templates require additional config
         if !template_instance.requires_additional_config() {
             return Ok(None);
         }
 
-        // Get saved endpoint IDs
-        let endpoint_ids = if let Ok(credential_store) = CredentialStore::new() {
-            credential_store.get_endpoint_ids(template_type)
-        } else {
-            Vec::new()
-        };
+        let endpoint_ids = CredentialStore::new()
+            .map(|store| store.get_endpoint_ids(template_type))
+            .unwrap_or_default();
 
         if endpoint_ids.is_empty() {
-            // No saved endpoint IDs, prompt for new one
-            if let Some(url) = template_instance.api_key_url() {
-                println!("  💡 Get your endpoint ID from: {}", url);
-            }
-
-            let prompt_text = format!("Enter {} endpoint ID:", template_type);
-            let endpoint_id =
-                NavigationManager::get_text_input(&prompt_text, Some("ep-xxx-xxx"), None)?;
-
-            if !endpoint_id.trim().is_empty() {
-                return Ok(Some(endpoint_id));
-            }
-            return Err(SelectorError::InvalidInput(
-                "Endpoint ID cannot be empty".to_string(),
-            ));
+            return Self::prompt_endpoint_id(template_type);
         }
-
-        // Create selection options
-        let items: Vec<EndpointItem> = endpoint_ids
-            .into_iter()
-            .map(|(display_name, endpoint_id)| EndpointItem {
-                display_name,
-                endpoint_id,
-            })
-            .collect();
 
         let mut options = vec!["Enter new endpoint ID...".to_string()];
-
-        for item in &items {
-            options.push(item.display_name.clone());
+        for (display_name, _) in &endpoint_ids {
+            options.push(display_name.clone());
         }
 
-        let selection = NavigationManager::select_option(
+        let selection = inquire::Select::new(
             &format!("Select {} endpoint ID:", template_type),
-            &options.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
-            Some("↑/↓: Navigate, →: Select, ←/Esc: Back"),
-        )?;
+            options,
+        )
+        .with_help_message("↑/↓: Navigate, Enter: Select, Esc: Cancel")
+        .prompt()
+        .map_err(inquire_to_selector_error)?;
 
         if selection == "Enter new endpoint ID..." {
-            if let Some(url) = template_instance.api_key_url() {
-                println!("  💡 Get your endpoint ID from: {}", url);
-            }
-
-            let prompt_text = format!("Enter {} endpoint ID:", template_type);
-            let endpoint_id =
-                NavigationManager::get_text_input(&prompt_text, Some("ep-xxx-xxx"), None)?;
-
-            if !endpoint_id.trim().is_empty() {
-                Ok(Some(endpoint_id))
-            } else {
-                Err(SelectorError::InvalidInput(
-                    "Endpoint ID cannot be empty".to_string(),
-                ))
-            }
+            Self::prompt_endpoint_id(template_type)
         } else {
-            // Find and return the selected endpoint ID
-            for item in items {
-                if item.display_name == selection {
-                    return Ok(Some(item.endpoint_id));
-                }
-            }
-            Err(SelectorError::NotFound)
+            endpoint_ids
+                .into_iter()
+                .find(|(name, _)| name == &selection)
+                .map(|(_, id)| Some(id))
+                .ok_or(SelectorError::NotFound)
+        }
+    }
+
+    fn prompt_endpoint_id(template_type: &TemplateType) -> SelectorResult<Option<String>> {
+        let template_instance = get_template_instance(template_type);
+
+        if let Some(url) = template_instance.api_key_url() {
+            println!("  Get your endpoint ID from: {}", url);
+        }
+
+        let endpoint_id = inquire::Text::new(&format!("Enter {} endpoint ID:", template_type))
+            .with_placeholder("ep-xxx-xxx")
+            .prompt()
+            .map_err(inquire_to_selector_error)?;
+
+        if endpoint_id.trim().is_empty() {
+            Err(SelectorError::InvalidInput(
+                "Endpoint ID cannot be empty".to_string(),
+            ))
+        } else {
+            Ok(Some(endpoint_id))
         }
     }
 }
 
-/// Template item for selection
-#[derive(Debug, Clone)]
-struct TemplateItem {
-    template_type: TemplateType,
-}
-
-impl TemplateItem {
-    fn new(template_type: TemplateType) -> Self {
-        Self { template_type }
+/// Convert inquire errors to SelectorError
+fn inquire_to_selector_error(e: inquire::InquireError) -> SelectorError {
+    let msg = e.to_string();
+    if msg.contains("canceled") || msg.contains("cancelled") {
+        SelectorError::Cancelled
+    } else {
+        SelectorError::Failed(msg)
     }
 }
 
-impl SelectableItem for TemplateItem {
-    fn display_name(&self) -> String {
-        format!("{}", self.template_type)
-    }
-
-    fn format_for_list(&self) -> String {
-        let template_instance = get_template_instance(&self.template_type);
-        let env_vars = template_instance.env_var_names();
-        let env_indicator = if env_vars.len() > 1 {
-            format!(" (+{})", env_vars.len())
-        } else {
-            String::new()
-        };
-
-        format!("{} ({:?}){}", self.template_type, env_vars, env_indicator)
-    }
-
-    fn id(&self) -> Option<String> {
-        Some(format!("{:?}", self.template_type))
-    }
-}
-
-/// Endpoint ID item for selection
-#[derive(Debug, Clone)]
-struct EndpointItem {
-    display_name: String,
-    endpoint_id: String,
-}
-
-impl SelectableItem for EndpointItem {
-    fn display_name(&self) -> String {
-        self.display_name.clone()
-    }
-
-    fn format_for_list(&self) -> String {
-        self.display_name.clone()
-    }
-
-    fn id(&self) -> Option<String> {
-        Some(self.endpoint_id.clone())
-    }
-}
-
-/// Simple endpoint ID selector for legacy compatibility
+/// Legacy compatibility function
 pub fn get_endpoint_id_interactively(template_type: &TemplateType) -> SelectorResult<String> {
     match TemplateSelector::get_endpoint_id_for_template(template_type)? {
         Some(endpoint_id) => Ok(endpoint_id),
