@@ -21,10 +21,11 @@ fn get_common_env_vars() -> HashMap<String, String> {
 }
 
 /// Inject common environment variables into settings
+/// Does not overwrite keys that are already set by the template
 fn inject_common_env_vars(settings: &mut ClaudeSettings) {
     if let Some(ref mut env) = settings.env {
         for (key, value) in get_common_env_vars() {
-            env.insert(key, value);
+            env.entry(key).or_insert(value);
         }
     } else {
         settings.env = Some(get_common_env_vars());

@@ -175,6 +175,9 @@ impl Template for ZaiTemplate {
         if matches!(scope, SnapshotScope::Common | SnapshotScope::All) {
             settings.model = Some(self.region.model_name().to_string());
 
+            // Disable co-authored-by in git commits
+            settings.include_co_authored_by = Some(false);
+
             // Use the new permissions format from the provided version
             settings.permissions = Some(Permissions {
                 allow: Some(vec![
@@ -223,6 +226,11 @@ impl Template for ZaiTemplate {
             env.insert("AUTH_HEADER_MODE".to_string(), "x-api-key".to_string());
             env.insert(
                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),
+                "1".to_string(),
+            );
+            env.insert("ENABLE_TOOL_SEARCH".to_string(), "0".to_string());
+            env.insert(
+                "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS".to_string(),
                 "1".to_string(),
             );
             settings.env = Some(env);
