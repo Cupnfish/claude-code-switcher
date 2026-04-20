@@ -176,7 +176,10 @@ impl Template for ZaiTemplate {
             settings.model = Some(self.region.model_name().to_string());
 
             // Disable co-authored-by in git commits
-            settings.include_co_authored_by = Some(false);
+            settings.attribution = Some(crate::settings::Attribution {
+                commit: Some(String::new()),
+                pr: Some(String::new()),
+            });
 
             // Use the new permissions format from the provided version
             settings.permissions = Some(Permissions {

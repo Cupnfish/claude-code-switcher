@@ -19,7 +19,7 @@ pub struct ClaudeSettings {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_style: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub include_co_authored_by: Option<bool>,
+    pub attribution: Option<Attribution>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub permissions: Option<Permissions>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -48,8 +48,8 @@ pub struct ClaudeSettings {
     pub status_line: Option<StatusLine>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subagent_model: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub effort: Option<String>,
+    #[serde(rename = "effortLevel", skip_serializing_if = "Option::is_none")]
+    pub effort_level: Option<String>,
 }
 
 impl<'de> Deserialize<'de> for ClaudeSettings {
@@ -66,7 +66,7 @@ impl<'de> Deserialize<'de> for ClaudeSettings {
             #[serde(default)]
             output_style: Option<String>,
             #[serde(default)]
-            include_co_authored_by: Option<bool>,
+            attribution: Option<Attribution>,
             #[serde(default)]
             permissions: Option<Permissions>,
             #[serde(default)]
@@ -95,8 +95,8 @@ impl<'de> Deserialize<'de> for ClaudeSettings {
             status_line: Option<StatusLine>,
             #[serde(default)]
             subagent_model: Option<String>,
-            #[serde(default)]
-            effort: Option<String>,
+            #[serde(default, rename = "effortLevel")]
+            effort_level: Option<String>,
         }
 
         let raw = ClaudeSettingsRaw::deserialize(deserializer)?;
@@ -104,7 +104,7 @@ impl<'de> Deserialize<'de> for ClaudeSettings {
             env: raw.env,
             model: raw.model,
             output_style: raw.output_style,
-            include_co_authored_by: raw.include_co_authored_by,
+            attribution: raw.attribution,
             permissions: raw.permissions,
             hooks: raw.hooks,
             api_key_helper: raw.api_key_helper,
@@ -119,7 +119,7 @@ impl<'de> Deserialize<'de> for ClaudeSettings {
             aws_credential_export: raw.aws_credential_export,
             status_line: raw.status_line,
             subagent_model: raw.subagent_model,
-            effort: raw.effort,
+            effort_level: raw.effort_level,
         })
     }
 }
@@ -227,6 +227,15 @@ pub struct StatusLine {
     pub r#type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
+}
+
+/// Attribution configuration for git commits and pull requests
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct Attribution {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr: Option<String>,
 }
 
 impl ClaudeSettings {
@@ -361,7 +370,7 @@ impl crate::Configurable for ClaudeSettings {
             env: merge_hashmaps(self.env, other.env),
             model: other.model.or(self.model),
             output_style: other.output_style.or(self.output_style),
-            include_co_authored_by: other.include_co_authored_by.or(self.include_co_authored_by),
+            attribution: merge_attribution(self.attribution, other.attribution),
             permissions: merge_permissions(self.permissions, other.permissions),
             hooks: merge_hooks(self.hooks, other.hooks),
             api_key_helper: other.api_key_helper.or(self.api_key_helper),
@@ -382,7 +391,7 @@ impl crate::Configurable for ClaudeSettings {
             ),
             aws_auth_refresh: other.aws_auth_refresh.or(self.aws_auth_refresh),
             aws_credential_export: other.aws_credential_export.or(self.aws_credential_export),
-            effort: other.effort.or(self.effort),
+            effort_level: other.effort_level.or(self.effort_level),
             status_line: other.status_line.or(self.status_line),
             subagent_model: other.subagent_model.or(self.subagent_model),
         }
@@ -399,12 +408,12 @@ impl crate::Configurable for ClaudeSettings {
                 env: self.env,
                 model: self.model,
                 output_style: self.output_style,
-                include_co_authored_by: self.include_co_authored_by,
+                attribution: self.attribution,
                 permissions: self.permissions,
                 hooks: self.hooks,
                 status_line: self.status_line,
                 subagent_model: self.subagent_model,
-                effort: self.effort,
+                effort_level: self.effort_level,
                 ..Default::default()
             },
         }
@@ -479,6 +488,19 @@ fn merge_hooks(base: Option<Hooks>, override_settings: Option<Hooks>) -> Option<
         }),
         (Some(base_hooks), None) => Some(base_hooks),
         (None, Some(override_hooks)) => Some(override_hooks),
+        (None, None) => None,
+    }
+}
+
+/// Helper function to merge attribution settings
+fn merge_attribution(base: Option<Attribution>, other: Option<Attribution>) -> Option<Attribution> {
+    match (base, other) {
+        (Some(base_attr), Some(other_attr)) => Some(Attribution {
+            commit: other_attr.commit.or(base_attr.commit),
+            pr: other_attr.pr.or(base_attr.pr),
+        }),
+        (Some(base_attr), None) => Some(base_attr),
+        (None, Some(other_attr)) => Some(other_attr),
         (None, None) => None,
     }
 }

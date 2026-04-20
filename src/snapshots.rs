@@ -263,7 +263,7 @@ pub fn filter_settings_by_scope(settings: ClaudeSettings, scope: &SnapshotScope)
             env: settings.env,
             model: settings.model,
             output_style: settings.output_style,
-            include_co_authored_by: settings.include_co_authored_by,
+            attribution: settings.attribution,
             permissions: settings.permissions,
             hooks: settings.hooks,
             status_line: settings.status_line,

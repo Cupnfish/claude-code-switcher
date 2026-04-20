@@ -105,9 +105,9 @@ fn prompt_effort_setting(
     effort_param: Option<&str>,
     cli_mode: bool,
 ) -> Result<Option<String>> {
-    // CLI mode: use param or default to max
+    // CLI mode: use param or default to xhigh
     if cli_mode {
-        return Ok(Some(effort_param.unwrap_or("max").to_string()));
+        return Ok(Some(effort_param.unwrap_or("xhigh").to_string()));
     }
 
     // If --effort provided in interactive mode, use it directly
@@ -117,7 +117,7 @@ fn prompt_effort_setting(
 
     // Interactive prompt
     let mut options = vec![
-        "max".to_string(),
+        "xhigh".to_string(),
         "high".to_string(),
         "medium".to_string(),
         "low".to_string(),
@@ -148,40 +148,50 @@ fn prompt_effort_setting(
     Ok(Some(selection))
 }
 
-/// Prompt user to select include_co_authored_by setting
-fn prompt_co_author_setting(
-    template_value: Option<bool>,
-    existing_value: Option<bool>,
-    co_author_param: Option<bool>,
+/// Prompt user to configure attribution setting
+fn prompt_attribution_setting(
+    template_value: Option<crate::settings::Attribution>,
+    existing_value: Option<crate::settings::Attribution>,
+    no_co_author: bool,
     cli_mode: bool,
-) -> Result<Option<bool>> {
-    // CLI mode: use param or default to false
-    if cli_mode {
-        return Ok(Some(co_author_param.unwrap_or(false)));
+) -> Result<Option<crate::settings::Attribution>> {
+    use crate::settings::Attribution;
+
+    // If --no-co-author flag is set, disable attribution
+    if no_co_author {
+        return Ok(Some(Attribution {
+            commit: Some(String::new()),
+            pr: Some(String::new()),
+        }));
     }
 
-    // If --co-author provided in interactive mode, use it directly
-    if let Some(val) = co_author_param {
-        return Ok(Some(val));
+    // CLI mode without flag: keep existing or use template default
+    if cli_mode {
+        return Ok(existing_value.or(template_value));
     }
 
     // Interactive prompt
     let mut options = vec![
-        "false (exclude co-author)".to_string(),
-        "true (include co-author)".to_string(),
+        "Default (include co-author)".to_string(),
+        "Disable co-author".to_string(),
     ];
 
-    if let Some(v) = existing_value {
-        options.insert(0, format!("Keep existing ({})", v));
+    if existing_value.is_some() {
+        let display = match &existing_value {
+            Some(a) if a.commit.as_deref() == Some("") => "disabled".to_string(),
+            Some(_) => "custom".to_string(),
+            None => "default".to_string(),
+        };
+        options.insert(0, format!("Keep existing ({})", display));
     }
 
     options.push("Skip".to_string());
 
     let selection = match inquire::Select::new(
-        "Include co-authored-by in commits?",
+        "Configure attribution for commits and PRs?",
         options,
     )
-    .with_help_message("Controls whether Claude adds co-authored-by to git commits")
+    .with_help_message("Controls whether Claude adds co-authored-by to git commits and PRs")
     .prompt()
     {
         Ok(s) => s,
@@ -196,7 +206,15 @@ fn prompt_co_author_setting(
         return Ok(existing_value);
     }
 
-    Ok(Some(selection.starts_with("true")))
+    if selection == "Disable co-author" {
+        Ok(Some(Attribution {
+            commit: Some(String::new()),
+            pr: Some(String::new()),
+        }))
+    } else {
+        // Default - omit attribution to use Claude Code's default behavior
+        Ok(None)
+    }
 }
 
 /// Run a command based on CLI arguments
@@ -215,8 +233,8 @@ pub fn run_command(args: &crate::Cli) -> Result<()> {
             cli,
             effort,
             api_key,
-            co_author,
-        } => apply_command(target, scope, model, settings_path, *backup, *yes, *cli, effort, api_key, co_author)?,
+            no_co_author,
+        } => apply_command(target, scope, model, settings_path, *backup, *yes, *cli, effort, api_key, *no_co_author)?,
         cli::Commands::Credentials { command } => match command {
             cli::CredentialCommands::List => credentials_list_command()?,
             cli::CredentialCommands::Clear { yes } => credentials_clear_command(*yes)?,
@@ -311,7 +329,7 @@ pub fn apply_command(
     cli: bool,
     effort: &Option<String>,
     api_key: &Option<String>,
-    co_author: &Option<bool>,
+    no_co_author: bool,
 ) -> Result<()> {
     let settings_path = get_settings_path(settings_path.clone());
     let yes = yes || cli; // CLI mode implies --yes
@@ -329,7 +347,7 @@ pub fn apply_command(
             cli,
             effort,
             api_key,
-            co_author,
+            no_co_author,
         );
     }
 
@@ -349,7 +367,7 @@ fn apply_template_command(
     cli: bool,
     effort: &Option<String>,
     api_key: &Option<String>,
-    co_author: &Option<bool>,
+    no_co_author: bool,
 ) -> Result<()> {
     // Resolve template instance
     let template_instance = if cli {
@@ -387,18 +405,18 @@ fn apply_template_command(
     let existing_settings = ClaudeSettings::from_file(settings_path)?;
 
     // Set effort level
-    settings.effort = prompt_effort_setting(
-        settings.effort.clone(),
-        existing_settings.effort.clone(),
+    settings.effort_level = prompt_effort_setting(
+        settings.effort_level.clone(),
+        existing_settings.effort_level.clone(),
         effort.as_deref(),
         cli,
     )?;
 
-    // Set co-authored-by
-    settings.include_co_authored_by = prompt_co_author_setting(
-        settings.include_co_authored_by,
-        existing_settings.include_co_authored_by,
-        *co_author,
+    // Set attribution
+    settings.attribution = prompt_attribution_setting(
+        settings.attribution,
+        existing_settings.attribution.clone(),
+        no_co_author,
         cli,
     )?;
 
@@ -428,7 +446,7 @@ fn apply_template_command(
         println!("Changes to be applied:");
         println!("{}", comparison);
 
-        if !confirm_action("Apply these changes?", false)? {
+        if !confirm_action("Apply these changes?", true)? {
             return Ok(());
         }
     }
@@ -485,7 +503,7 @@ fn apply_snapshot_command(
         println!("\nSnapshot settings:");
         println!("{}", format_settings_for_display(&snapshot_masked, false));
 
-        if !confirm_action("Apply these settings?", false)? {
+        if !confirm_action("Apply these settings?", true)? {
             return Ok(());
         }
     }
