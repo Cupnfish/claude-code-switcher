@@ -449,7 +449,11 @@ fn apply_template_command(
         println!("Changes to be applied:");
         println!("{}", comparison);
 
-        if !confirm_action("Apply these changes?", true)? {
+        let options = vec!["Apply", "Cancel"];
+        let selection = inquire::Select::new("Confirm:", options)
+            .prompt()
+            .map_err(|_| anyhow::anyhow!("Cancelled"))?;
+        if selection == "Cancel" {
             return Ok(());
         }
     }
@@ -506,7 +510,11 @@ fn apply_snapshot_command(
         println!("\nSnapshot settings:");
         println!("{}", format_settings_for_display(&snapshot_masked, false));
 
-        if !confirm_action("Apply these settings?", true)? {
+        let options = vec!["Apply", "Cancel"];
+        let selection = inquire::Select::new("Confirm:", options)
+            .prompt()
+            .map_err(|_| anyhow::anyhow!("Cancelled"))?;
+        if selection == "Cancel" {
             return Ok(());
         }
     }
