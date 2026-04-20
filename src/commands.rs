@@ -165,15 +165,18 @@ fn prompt_attribution_setting(
         }));
     }
 
-    // CLI mode without flag: keep existing or use template default
+    // CLI mode without flag: disable co-author by default
     if cli_mode {
-        return Ok(existing_value.or(template_value));
+        return Ok(Some(Attribution {
+            commit: Some(String::new()),
+            pr: Some(String::new()),
+        }));
     }
 
     // Interactive prompt
     let mut options = vec![
-        "Default (include co-author)".to_string(),
         "Disable co-author".to_string(),
+        "Enable co-author".to_string(),
     ];
 
     if existing_value.is_some() {
@@ -212,7 +215,7 @@ fn prompt_attribution_setting(
             pr: Some(String::new()),
         }))
     } else {
-        // Default - omit attribution to use Claude Code's default behavior
+        // Enable - omit attribution to use Claude Code's default behavior
         Ok(None)
     }
 }
