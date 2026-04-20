@@ -123,7 +123,7 @@ impl Template for MiniMaxTemplate {
             );
             env.insert("ANTHROPIC_MODEL".to_string(), "MiniMax-M2.5".to_string());
             env.insert(
-                "ANTHROPIC_SMALL_FAST_MODEL".to_string(),
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
                 "MiniMax-M2.5".to_string(),
             );
             env.insert(
@@ -132,10 +132,6 @@ impl Template for MiniMaxTemplate {
             );
             env.insert(
                 "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
-                "MiniMax-M2.5".to_string(),
-            );
-            env.insert(
-                "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
                 "MiniMax-M2.5".to_string(),
             );
             env.insert("API_TIMEOUT_MS".to_string(), "3000000".to_string());

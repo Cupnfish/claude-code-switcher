@@ -93,7 +93,15 @@ impl Template for ZenmuxTemplate {
                 "1".to_string(),
             );
             env.insert(
-                "ANTHROPIC_SMALL_FAST_MODEL".to_string(),
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
+                "google/gemini-3-pro-preview-free".to_string(),
+            );
+            env.insert(
+                "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
+                "google/gemini-3-pro-preview-free".to_string(),
+            );
+            env.insert(
+                "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
                 "google/gemini-3-pro-preview-free".to_string(),
             );
             settings.env = Some(env);

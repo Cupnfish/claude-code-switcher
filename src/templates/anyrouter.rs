@@ -45,10 +45,6 @@ impl AnyRouterRegion {
         "opus[1m]"
     }
 
-    pub fn small_fast_model(&self) -> &'static str {
-        "opus[1m]"
-    }
-
     pub fn api_host(&self) -> &'static str {
         match self {
             AnyRouterRegion::China => "a-ocnfniawgw.cn-shanghai.fcapp.run",
@@ -185,8 +181,16 @@ impl Template for AnyRouterTemplate {
                 self.region.model_name().to_string(),
             );
             env.insert(
-                "ANTHROPIC_SMALL_FAST_MODEL".to_string(),
-                self.region.small_fast_model().to_string(),
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
+                self.region.model_name().to_string(),
+            );
+            env.insert(
+                "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
+                self.region.model_name().to_string(),
+            );
+            env.insert(
+                "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
+                self.region.model_name().to_string(),
             );
             settings.env = Some(env);
         }

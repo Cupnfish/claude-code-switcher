@@ -82,7 +82,15 @@ impl Template for SeedCodeTemplate {
                 "doubao-seed-code-preview-latest".to_string(),
             );
             env.insert(
-                "ANTHROPIC_SMALL_FAST_MODEL".to_string(),
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
+                "doubao-seed-code-preview-latest".to_string(),
+            );
+            env.insert(
+                "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
+                "doubao-seed-code-preview-latest".to_string(),
+            );
+            env.insert(
+                "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
                 "doubao-seed-code-preview-latest".to_string(),
             );
             env.insert("API_TIMEOUT_MS".to_string(), "3000000".to_string());

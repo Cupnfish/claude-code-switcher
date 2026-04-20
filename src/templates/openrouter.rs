@@ -257,7 +257,15 @@ impl Template for OpenRouterTemplate {
             env.insert("ANTHROPIC_API_KEY".to_string(), "".to_string());
             env.insert("ANTHROPIC_MODEL".to_string(), self.model_id.clone());
             env.insert(
-                "ANTHROPIC_SMALL_FAST_MODEL".to_string(),
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
+                self.model_id.clone(),
+            );
+            env.insert(
+                "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
+                self.model_id.clone(),
+            );
+            env.insert(
+                "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
                 self.model_id.clone(),
             );
             env.insert("API_TIMEOUT_MS".to_string(), "600000".to_string());

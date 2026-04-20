@@ -50,13 +50,6 @@ impl ZaiRegion {
         }
     }
 
-    pub fn small_fast_model(&self) -> &'static str {
-        match self {
-            ZaiRegion::China => "glm-5.1",
-            ZaiRegion::International => "glm-5.1",
-        }
-    }
-
     pub fn api_key_url(&self) -> &'static str {
         match self {
             ZaiRegion::China => "https://open.bigmodel.cn/usercenter/apikeys",
@@ -217,8 +210,16 @@ impl Template for ZaiTemplate {
                 self.region.model_name().to_string(),
             );
             env.insert(
-                "ANTHROPIC_SMALL_FAST_MODEL".to_string(),
-                self.region.small_fast_model().to_string(),
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
+                self.region.model_name().to_string(),
+            );
+            env.insert(
+                "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
+                self.region.model_name().to_string(),
+            );
+            env.insert(
+                "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
+                self.region.model_name().to_string(),
             );
             env.insert("ENABLE_THINKING".to_string(), "true".to_string());
             env.insert("REASONING_EFFORT".to_string(), "ultrathink".to_string());
