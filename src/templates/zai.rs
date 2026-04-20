@@ -211,7 +211,7 @@ impl Template for ZaiTemplate {
             );
             env.insert(
                 "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
-                self.region.model_name().to_string(),
+                "GLM-4.7".to_string(),
             );
             env.insert(
                 "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
