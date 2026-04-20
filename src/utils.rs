@@ -167,6 +167,73 @@ pub fn is_valid_uuid(uuid_str: &str) -> bool {
     uuid::Uuid::parse_str(uuid_str).is_ok()
 }
 
+/// Detect Git Bash paths on Windows for CLAUDE_CODE_GIT_BASH_PATH
+#[cfg(target_os = "windows")]
+pub fn detect_git_bash_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+
+    let mut try_add = |path: PathBuf| {
+        if path.exists() && !paths.contains(&path) {
+            paths.push(path);
+        }
+    };
+
+    // Common installation paths
+    try_add(PathBuf::from(r"C:\Program Files\Git\bin\bash.exe"));
+    try_add(PathBuf::from(r"C:\Program Files (x86)\Git\bin\bash.exe"));
+    try_add(PathBuf::from(r"C:\Git\bin\bash.exe"));
+
+    // Scoop installation
+    if let Ok(home) = std::env::var("USERPROFILE") {
+        try_add(
+            PathBuf::from(home)
+                .join("scoop")
+                .join("apps")
+                .join("git")
+                .join("current")
+                .join("bin")
+                .join("bash.exe"),
+        );
+    }
+
+    // ProgramFiles env vars
+    if let Ok(pf) = std::env::var("ProgramFiles") {
+        try_add(PathBuf::from(&pf).join("Git").join("bin").join("bash.exe"));
+    }
+    if let Ok(pf) = std::env::var("ProgramFiles(x86)") {
+        try_add(PathBuf::from(&pf).join("Git").join("bin").join("bash.exe"));
+    }
+
+    // GIT_INSTALL_ROOT env var
+    if let Ok(git_root) = std::env::var("GIT_INSTALL_ROOT") {
+        try_add(PathBuf::from(&git_root).join("bin").join("bash.exe"));
+    }
+
+    // From PATH - find git.exe and derive bash.exe path
+    if let Ok(path_var) = std::env::var("PATH") {
+        for entry in path_var.split(';') {
+            let entry = entry.trim();
+            if entry.is_empty() {
+                continue;
+            }
+            let git_exe = PathBuf::from(entry).join("git.exe");
+            if git_exe.exists() {
+                if let Some(parent) = git_exe.parent() {
+                    if parent.ends_with("cmd") {
+                        if let Some(git_root) = parent.parent() {
+                            try_add(git_root.join("bin").join("bash.exe"));
+                        }
+                    } else if parent.ends_with("bin") {
+                        try_add(parent.join("bash.exe"));
+                    }
+                }
+            }
+        }
+    }
+
+    paths
+}
+
 /// Get timestamp for display
 pub fn get_timestamp() -> String {
     let now = chrono::Utc::now();

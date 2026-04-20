@@ -517,8 +517,49 @@ pub fn prompt_save_credential(
     Ok(None)
 }
 
+/// Get API key in non-interactive (CLI) mode
+/// Uses --api-key parameter or first available env var
+pub fn get_api_key_cli(template_type: TemplateType, api_key_param: Option<&str>) -> Result<String> {
+    // Use provided API key if available
+    if let Some(key) = api_key_param {
+        if !key.trim().is_empty() {
+            return Ok(key.to_string());
+        }
+    }
+
+    // Try environment variables
+    let env_var_names = crate::templates::get_env_var_names(&template_type);
+    for env_var_name in &env_var_names {
+        if let Some(api_key) = std::env::var(env_var_name)
+            .ok()
+            .filter(|key| !key.trim().is_empty())
+        {
+            println!("✓ Using API key from environment variable {}", env_var_name);
+            return Ok(api_key);
+        }
+    }
+
+    Err(anyhow!(
+        "No API key available in CLI mode. Set one of: {} or use --api-key",
+        env_var_names.join(", ")
+    ))
+}
+
 /// Get API key interactively using simple selector
-pub fn get_api_key_interactively(template_type: TemplateType) -> Result<String> {
+/// If api_key_param is provided, skip all prompts and use it directly
+pub fn get_api_key_interactively(template_type: TemplateType, api_key_param: Option<&str>) -> Result<String> {
+    // Use provided API key if available
+    if let Some(key) = api_key_param {
+        if !key.trim().is_empty() {
+            return Ok(key.to_string());
+        }
+    }
+
+    get_api_key_interactive_inner(template_type)
+}
+
+/// Inner interactive API key selection logic
+fn get_api_key_interactive_inner(template_type: TemplateType) -> Result<String> {
     // First, try to get API key from environment variables
     let env_var_names = crate::templates::get_env_var_names(&template_type);
     let mut env_vars_with_keys = Vec::new();

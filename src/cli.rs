@@ -43,6 +43,22 @@ pub enum Commands {
         /// Skip confirmation prompt
         #[arg(long, help = "Skip confirmation prompt")]
         yes: bool,
+
+        /// CLI mode: skip all interactive prompts, use parameters/defaults
+        #[arg(long, help = "Non-interactive mode: skip prompts, use params/defaults")]
+        cli: bool,
+
+        /// Effort level (max/high/medium/low)
+        #[arg(long, help = "Set effort level (default: max in CLI mode)")]
+        effort: Option<String>,
+
+        /// API key to use (skips interactive key selection)
+        #[arg(long, help = "API key to use (skips interactive selection)")]
+        api_key: Option<String>,
+
+        /// Include co-authored-by in commits (true/false)
+        #[arg(long, help = "Include co-authored-by in commits (true/false)")]
+        co_author: Option<bool>,
     },
 
     /// Manage saved credentials [aliases: creds, cred]

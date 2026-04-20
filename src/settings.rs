@@ -48,6 +48,8 @@ pub struct ClaudeSettings {
     pub status_line: Option<StatusLine>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subagent_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
 }
 
 impl<'de> Deserialize<'de> for ClaudeSettings {
@@ -93,6 +95,8 @@ impl<'de> Deserialize<'de> for ClaudeSettings {
             status_line: Option<StatusLine>,
             #[serde(default)]
             subagent_model: Option<String>,
+            #[serde(default)]
+            effort: Option<String>,
         }
 
         let raw = ClaudeSettingsRaw::deserialize(deserializer)?;
@@ -115,6 +119,7 @@ impl<'de> Deserialize<'de> for ClaudeSettings {
             aws_credential_export: raw.aws_credential_export,
             status_line: raw.status_line,
             subagent_model: raw.subagent_model,
+            effort: raw.effort,
         })
     }
 }
@@ -377,6 +382,7 @@ impl crate::Configurable for ClaudeSettings {
             ),
             aws_auth_refresh: other.aws_auth_refresh.or(self.aws_auth_refresh),
             aws_credential_export: other.aws_credential_export.or(self.aws_credential_export),
+            effort: other.effort.or(self.effort),
             status_line: other.status_line.or(self.status_line),
             subagent_model: other.subagent_model.or(self.subagent_model),
         }
@@ -398,6 +404,7 @@ impl crate::Configurable for ClaudeSettings {
                 hooks: self.hooks,
                 status_line: self.status_line,
                 subagent_model: self.subagent_model,
+                effort: self.effort,
                 ..Default::default()
             },
         }

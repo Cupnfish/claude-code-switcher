@@ -281,6 +281,35 @@ pub fn get_template_instance(template_type: &TemplateType) -> Box<dyn Template> 
     get_template_instance_with_input(template_type, "")
 }
 
+/// Resolve a template instance in CLI (non-interactive) mode
+/// Returns an error if the target is generic and requires variant selection
+pub fn resolve_template_cli(
+    template_type: &TemplateType,
+    target: &str,
+) -> Result<Box<dyn Template>> {
+    let initial = get_template_instance_with_input(template_type, target);
+
+    if !initial.has_variants() || !is_generic_target(target) {
+        return Ok(initial);
+    }
+
+    // Generic target - suggest specific aliases
+    let suggestions = match template_type {
+        TemplateType::Zai => "Use 'zai-china' or 'zai-international'",
+        TemplateType::KatCoder => "Use 'kat-coder-pro' or 'kat-coder-air'",
+        TemplateType::Kimi => "Use 'k2', 'k2-thinking', or 'moonshot'",
+        TemplateType::AnyRouter => "Use 'anyr-china' or 'anyr-fallback'",
+        TemplateType::OpenRouter => "Specify a model directly or use interactive mode",
+        _ => "Use a specific variant name",
+    };
+
+    Err(anyhow::anyhow!(
+        "CLI mode requires a specific variant for '{}'. {}",
+        target,
+        suggestions
+    ))
+}
+
 /// Resolve a template instance, prompting for variant selection if needed
 pub fn resolve_template_interactive(
     template_type: &TemplateType,

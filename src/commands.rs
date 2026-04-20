@@ -1,9 +1,9 @@
 use crate::{
     Configurable, CredentialManager, cli,
-    credentials::{CredentialStore, get_api_key_interactively},
+    credentials::{CredentialStore, get_api_key_cli, get_api_key_interactively},
     settings::{ClaudeSettings, format_settings_comparison, format_settings_for_display},
     snapshots::{self, SnapshotScope, SnapshotStore},
-    templates::{TemplateType, get_template_type, resolve_template_interactive},
+    templates::{TemplateType, get_template_type, resolve_template_cli, resolve_template_interactive},
     utils::{
         backup_settings, confirm_action, get_credentials_dir, get_settings_path, get_snapshots_dir,
     },
@@ -32,6 +32,173 @@ fn inject_common_env_vars(settings: &mut ClaudeSettings) {
     }
 }
 
+/// Get Git Bash path for CLAUDE_CODE_GIT_BASH_PATH (Windows only)
+///
+/// Checks template settings and system env first. In CLI mode, auto-detects.
+/// In interactive mode, prompts the user. Returns None if already set or skipped.
+#[cfg(target_os = "windows")]
+fn get_git_bash_path(settings: &ClaudeSettings, cli_mode: bool) -> Result<Option<String>> {
+    if settings.env.as_ref().map_or(false, |e| e.contains_key("CLAUDE_CODE_GIT_BASH_PATH")) {
+        return Ok(None);
+    }
+
+    if let Ok(value) = std::env::var("CLAUDE_CODE_GIT_BASH_PATH") {
+        return Ok(Some(value));
+    }
+
+    let detected = crate::utils::detect_git_bash_paths();
+
+    if cli_mode {
+        return Ok(detected.into_iter().next().map(|p| p.display().to_string()));
+    }
+
+    let mut options: Vec<String> = detected.iter().map(|p| p.display().to_string()).collect();
+    options.push("Enter custom path...".to_string());
+    options.push("Skip".to_string());
+
+    let selection = match inquire::Select::new(
+        "Select Git Bash path for CLAUDE_CODE_GIT_BASH_PATH:",
+        options,
+    )
+    .prompt()
+    {
+        Ok(s) => s,
+        Err(_) => return Ok(None),
+    };
+
+    if selection == "Skip" {
+        return Ok(None);
+    }
+
+    if selection == "Enter custom path..." {
+        let custom_path = match inquire::Text::new("Enter Git Bash path:")
+            .with_validator(|input: &str| {
+                let path = PathBuf::from(input.trim());
+                if path.exists() {
+                    Ok(inquire::validator::Validation::Valid)
+                } else {
+                    Ok(inquire::validator::Validation::Invalid(
+                        "Path does not exist".into(),
+                    ))
+                }
+            })
+            .prompt()
+        {
+            Ok(s) => s,
+            Err(_) => return Ok(None),
+        };
+        return Ok(Some(custom_path));
+    }
+
+    Ok(Some(selection))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn get_git_bash_path(_settings: &ClaudeSettings, _cli_mode: bool) -> Result<Option<String>> {
+    Ok(None)
+}
+
+/// Prompt user to select effort level
+fn prompt_effort_setting(
+    template_effort: Option<String>,
+    existing_effort: Option<String>,
+    effort_param: Option<&str>,
+    cli_mode: bool,
+) -> Result<Option<String>> {
+    // CLI mode: use param or default to max
+    if cli_mode {
+        return Ok(Some(effort_param.unwrap_or("max").to_string()));
+    }
+
+    // If --effort provided in interactive mode, use it directly
+    if let Some(level) = effort_param {
+        return Ok(Some(level.to_string()));
+    }
+
+    // Interactive prompt
+    let mut options = vec![
+        "max".to_string(),
+        "high".to_string(),
+        "medium".to_string(),
+        "low".to_string(),
+    ];
+
+    if let Some(ref e) = existing_effort {
+        options.insert(0, format!("Keep existing ({})", e));
+    }
+
+    options.push("Skip".to_string());
+
+    let selection = match inquire::Select::new("Select effort level:", options)
+        .with_help_message("Controls reasoning depth for Claude Code")
+        .prompt()
+    {
+        Ok(s) => s,
+        Err(_) => return Ok(template_effort),
+    };
+
+    if selection == "Skip" {
+        return Ok(template_effort);
+    }
+
+    if selection.starts_with("Keep existing") {
+        return Ok(existing_effort);
+    }
+
+    Ok(Some(selection))
+}
+
+/// Prompt user to select include_co_authored_by setting
+fn prompt_co_author_setting(
+    template_value: Option<bool>,
+    existing_value: Option<bool>,
+    co_author_param: Option<bool>,
+    cli_mode: bool,
+) -> Result<Option<bool>> {
+    // CLI mode: use param or default to false
+    if cli_mode {
+        return Ok(Some(co_author_param.unwrap_or(false)));
+    }
+
+    // If --co-author provided in interactive mode, use it directly
+    if let Some(val) = co_author_param {
+        return Ok(Some(val));
+    }
+
+    // Interactive prompt
+    let mut options = vec![
+        "false (exclude co-author)".to_string(),
+        "true (include co-author)".to_string(),
+    ];
+
+    if let Some(v) = existing_value {
+        options.insert(0, format!("Keep existing ({})", v));
+    }
+
+    options.push("Skip".to_string());
+
+    let selection = match inquire::Select::new(
+        "Include co-authored-by in commits?",
+        options,
+    )
+    .with_help_message("Controls whether Claude adds co-authored-by to git commits")
+    .prompt()
+    {
+        Ok(s) => s,
+        Err(_) => return Ok(template_value),
+    };
+
+    if selection == "Skip" {
+        return Ok(template_value);
+    }
+
+    if selection.starts_with("Keep existing") {
+        return Ok(existing_value);
+    }
+
+    Ok(Some(selection.starts_with("true")))
+}
+
 /// Run a command based on CLI arguments
 pub fn run_command(args: &crate::Cli) -> Result<()> {
     match &args.command {
@@ -45,7 +212,11 @@ pub fn run_command(args: &crate::Cli) -> Result<()> {
             settings_path,
             backup,
             yes,
-        } => apply_command(target, scope, model, settings_path, *backup, *yes)?,
+            cli,
+            effort,
+            api_key,
+            co_author,
+        } => apply_command(target, scope, model, settings_path, *backup, *yes, *cli, effort, api_key, co_author)?,
         cli::Commands::Credentials { command } => match command {
             cli::CredentialCommands::List => credentials_list_command()?,
             cli::CredentialCommands::Clear { yes } => credentials_clear_command(*yes)?,
@@ -137,8 +308,13 @@ pub fn apply_command(
     settings_path: &Option<PathBuf>,
     backup: bool,
     yes: bool,
+    cli: bool,
+    effort: &Option<String>,
+    api_key: &Option<String>,
+    co_author: &Option<bool>,
 ) -> Result<()> {
     let settings_path = get_settings_path(settings_path.clone());
+    let yes = yes || cli; // CLI mode implies --yes
 
     // Try to parse as template type first
     if let Ok(template_type) = get_template_type(target) {
@@ -150,6 +326,10 @@ pub fn apply_command(
             &settings_path,
             backup,
             yes,
+            cli,
+            effort,
+            api_key,
+            co_author,
         );
     }
 
@@ -166,25 +346,61 @@ fn apply_template_command(
     settings_path: &PathBuf,
     backup: bool,
     yes: bool,
+    cli: bool,
+    effort: &Option<String>,
+    api_key: &Option<String>,
+    co_author: &Option<bool>,
 ) -> Result<()> {
-    // Resolve template instance (interactive variant selection if needed)
-    let template_instance = resolve_template_interactive(template_type, target)?;
+    // Resolve template instance
+    let template_instance = if cli {
+        resolve_template_cli(template_type, target)?
+    } else {
+        resolve_template_interactive(template_type, target)?
+    };
 
-    // Get API key (handles env vars, saved credentials, and interactive prompts)
-    let api_key = get_api_key_interactively(template_type.clone())?;
+    // Get API key
+    let api_key = if cli {
+        get_api_key_cli(template_type.clone(), api_key.as_deref())?
+    } else {
+        get_api_key_interactively(template_type.clone(), api_key.as_deref())?
+    };
 
     let mut settings = template_instance.create_settings(&api_key, scope);
 
     // Inject common environment variables
     inject_common_env_vars(&mut settings);
 
+    // Add Windows-specific CLAUDE_CODE_GIT_BASH_PATH
+    if let Some(git_bash_path) = get_git_bash_path(&settings, cli)? {
+        settings
+            .env
+            .get_or_insert_with(HashMap::new)
+            .insert("CLAUDE_CODE_GIT_BASH_PATH".to_string(), git_bash_path);
+    }
+
     // Override model if specified
     if let Some(model_name) = model {
         settings.model = Some(model_name.clone());
     }
 
-    // Load existing settings for comparison (will be replaced, not merged)
+    // Load existing settings for effort prompt and diff comparison
     let existing_settings = ClaudeSettings::from_file(settings_path)?;
+
+    // Set effort level
+    settings.effort = prompt_effort_setting(
+        settings.effort.clone(),
+        existing_settings.effort.clone(),
+        effort.as_deref(),
+        cli,
+    )?;
+
+    // Set co-authored-by
+    settings.include_co_authored_by = prompt_co_author_setting(
+        settings.include_co_authored_by,
+        existing_settings.include_co_authored_by,
+        *co_author,
+        cli,
+    )?;
 
     // Backup current settings if requested
     if backup {
