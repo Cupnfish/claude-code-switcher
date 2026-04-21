@@ -27,8 +27,18 @@ fn inject_common_env_vars(settings: &mut ClaudeSettings) {
         for (key, value) in get_common_env_vars() {
             env.entry(key).or_insert(value);
         }
+        #[cfg(target_os = "windows")]
+        {
+            env.entry("CLAUDE_CODE_USE_POWERSHELL_TOOL".to_string())
+                .or_insert_with(|| "1".to_string());
+        }
     } else {
-        settings.env = Some(get_common_env_vars());
+        let mut env = get_common_env_vars();
+        #[cfg(target_os = "windows")]
+        {
+            env.insert("CLAUDE_CODE_USE_POWERSHELL_TOOL".to_string(), "1".to_string());
+        }
+        settings.env = Some(env);
     }
 }
 
