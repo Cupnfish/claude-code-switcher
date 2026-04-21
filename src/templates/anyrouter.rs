@@ -42,7 +42,7 @@ impl AnyRouterRegion {
     }
 
     pub fn model_name(&self) -> &'static str {
-        "opus[1m]"
+        "claude-opus-4-7[1m]"
     }
 
     pub fn api_host(&self) -> &'static str {
@@ -191,6 +191,10 @@ impl Template for AnyRouterTemplate {
             env.insert(
                 "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
                 self.region.model_name().to_string(),
+            );
+            env.insert(
+                "ANTHROPIC_BETAS".to_string(),
+                "context-1m-2025-08-07".to_string(),
             );
             settings.env = Some(env);
         }
