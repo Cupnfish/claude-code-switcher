@@ -95,7 +95,7 @@ ccs apply zai
 # MiniMax - Anthropic 兼容，高性能 AI
 ccs apply minimax
 
-# DeepSeek - 价格优惠，响应快速
+# DeepSeek V4 - 思考模式，V4 Pro/Flash 模型，1M 上下文，价格优惠
 ccs apply deepseek
 # 别名：ds
 
@@ -138,7 +138,7 @@ ccs apply openrouter
 |--------|--------|------|------|--------|
 | **智谱 GLM** | `ccs apply zai` | `glm`, `zhipu` | GLM-5.1，200K 上下文，128K 输出，Coding 对齐 Claude Opus 4.6 | ⭐⭐⭐⭐⭐ |
 | **MiniMax** | `ccs apply minimax` | - | Anthropic 兼容，支持中国区/国际区 | ⭐⭐⭐⭐ |
-| **DeepSeek** | `ccs apply deepseek` | `ds` | 价格优惠，响应快速 | ⭐⭐⭐⭐ |
+| **DeepSeek V4** | `ccs apply deepseek` | `ds` | 思考模式，V4 Pro/Flash 模型，1M 上下文，价格优惠 | ⭐⭐⭐⭐ |
 | **OpenRouter** | `ccs apply openrouter` | `or` | 开放模型选择，支持多种模型 | ⭐⭐⭐⭐ |
 | **AnyRouter** | `ccs apply anyrouter` | `anyr`, `ar` | 智能路由，支持中国区/Fallback | ⭐⭐⭐⭐ |
 | **SeedCode** | `ccs apply seed-code` | `seedcode` | 字节跳动编程模型 | ⭐⭐⭐ |
