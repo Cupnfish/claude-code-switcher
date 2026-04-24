@@ -91,6 +91,10 @@ impl Template for DeepSeekTemplate {
                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),
                 "1".to_string(),
             );
+            env.insert(
+                "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS".to_string(),
+                "1".to_string(),
+            );
             settings.env = Some(env);
         }
 
