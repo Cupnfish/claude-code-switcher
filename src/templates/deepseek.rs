@@ -40,8 +40,7 @@ impl Template for DeepSeekTemplate {
         let mut settings = ClaudeSettings::new();
 
         if matches!(scope, SnapshotScope::Common | SnapshotScope::All) {
-            settings.model = Some("deepseek-v4-pro".to_string());
-            settings.effort_level = Some("max".to_string());
+            settings.model = Some("deepseek-v4-pro[1m]".to_string());
 
             settings.permissions = Some(Permissions {
                 allow: Some(vec![
@@ -74,21 +73,33 @@ impl Template for DeepSeekTemplate {
             env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.to_string());
             env.insert("API_TIMEOUT_MS".to_string(), "600000".to_string());
             env.insert("ENABLE_THINKING".to_string(), "true".to_string());
-            env.insert("ANTHROPIC_MODEL".to_string(), "deepseek-v4-pro".to_string());
+            env.insert(
+                "ANTHROPIC_MODEL".to_string(),
+                "deepseek-v4-pro[1m]".to_string(),
+            );
             env.insert(
                 "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
                 "deepseek-v4-flash".to_string(),
             );
             env.insert(
                 "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
-                "deepseek-v4-flash".to_string(),
+                "deepseek-v4-pro[1m]".to_string(),
             );
             env.insert(
                 "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
-                "deepseek-v4-pro".to_string(),
+                "deepseek-v4-pro[1m]".to_string(),
             );
             env.insert(
+                "CLAUDE_CODE_SUBAGENT_MODEL".to_string(),
+                "deepseek-v4-pro[1m]".to_string(),
+            );
+            env.insert("CLAUDE_CODE_EFFORT_LEVEL".to_string(), "max".to_string());
+            env.insert(
                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),
+                "1".to_string(),
+            );
+            env.insert(
+                "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK".to_string(),
                 "1".to_string(),
             );
             env.insert(

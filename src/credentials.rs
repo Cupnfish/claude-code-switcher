@@ -521,11 +521,10 @@ pub fn prompt_save_credential(
 /// Uses --api-key parameter or first available env var
 pub fn get_api_key_cli(template_type: TemplateType, api_key_param: Option<&str>) -> Result<String> {
     // Use provided API key if available
-    if let Some(key) = api_key_param {
-        if !key.trim().is_empty() {
+    if let Some(key) = api_key_param
+        && !key.trim().is_empty() {
             return Ok(key.to_string());
         }
-    }
 
     // Try environment variables
     let env_var_names = crate::templates::get_env_var_names(&template_type);
@@ -547,13 +546,15 @@ pub fn get_api_key_cli(template_type: TemplateType, api_key_param: Option<&str>)
 
 /// Get API key interactively using simple selector
 /// If api_key_param is provided, skip all prompts and use it directly
-pub fn get_api_key_interactively(template_type: TemplateType, api_key_param: Option<&str>) -> Result<String> {
+pub fn get_api_key_interactively(
+    template_type: TemplateType,
+    api_key_param: Option<&str>,
+) -> Result<String> {
     // Use provided API key if available
-    if let Some(key) = api_key_param {
-        if !key.trim().is_empty() {
+    if let Some(key) = api_key_param
+        && !key.trim().is_empty() {
             return Ok(key.to_string());
         }
-    }
 
     get_api_key_interactive_inner(template_type)
 }

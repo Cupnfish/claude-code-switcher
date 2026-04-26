@@ -456,8 +456,7 @@ impl<'a, T: SelectableItem + Clone> Selector<'a, T> {
                 let is_on_filter = self.config.show_filter && state.cursor_index == 0;
                 let is_on_create = self.config.allow_create
                     && state.cursor_index
-                        == state.filtered_items.len()
-                            + if self.config.show_filter { 1 } else { 0 };
+                        == state.filtered_items.len() + if self.config.show_filter { 1 } else { 0 };
                 let is_on_custom = self.config.allow_custom
                     && state.cursor_index
                         == state.filtered_items.len()
@@ -488,8 +487,7 @@ impl<'a, T: SelectableItem + Clone> Selector<'a, T> {
                 let is_on_filter = self.config.show_filter && state.cursor_index == 0;
                 let is_on_create = self.config.allow_create
                     && state.cursor_index
-                        == state.filtered_items.len()
-                            + if self.config.show_filter { 1 } else { 0 };
+                        == state.filtered_items.len() + if self.config.show_filter { 1 } else { 0 };
                 let is_on_custom = self.config.allow_custom
                     && state.cursor_index
                         == state.filtered_items.len()
@@ -805,7 +803,6 @@ impl<'a, T: SelectableItem + Clone> Selector<'a, T> {
         terminal::disable_raw_mode()?;
         Ok(())
     }
-
 }
 
 #[derive(Clone)]

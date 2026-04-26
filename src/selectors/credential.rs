@@ -132,8 +132,8 @@ impl CredentialSelector {
                 ..crate::selectors::base::SelectorConfig::default()
             };
 
-            let mut sel = crate::selectors::base::Selector::new(&title, credential_items)
-                .with_config(config);
+            let mut sel =
+                crate::selectors::base::Selector::new(&title, credential_items).with_config(config);
 
             match sel.prompt()? {
                 crate::selectors::base::SelectionResult::Selected(item)
@@ -146,10 +146,8 @@ impl CredentialSelector {
                 crate::selectors::base::SelectionResult::Delete(item) => {
                     // Perform deletion with confirmation
                     let credential = &item.credential;
-                    let confirmed = ConfirmationService::confirm_deletion(
-                        credential.name(),
-                        "credential",
-                    )?;
+                    let confirmed =
+                        ConfirmationService::confirm_deletion(credential.name(), "credential")?;
                     if confirmed {
                         let store = CredentialStore::new().map_err(|e| {
                             SelectorError::Storage(format!(

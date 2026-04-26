@@ -67,13 +67,11 @@ impl TemplateSelector {
             options.push(display_name.clone());
         }
 
-        let selection = inquire::Select::new(
-            &format!("Select {} endpoint ID:", template_type),
-            options,
-        )
-        .with_help_message("↑/↓: Navigate, Enter: Select, Esc: Cancel")
-        .prompt()
-        .map_err(inquire_to_selector_error)?;
+        let selection =
+            inquire::Select::new(&format!("Select {} endpoint ID:", template_type), options)
+                .with_help_message("↑/↓: Navigate, Enter: Select, Esc: Cancel")
+                .prompt()
+                .map_err(inquire_to_selector_error)?;
 
         if selection == "Enter new endpoint ID..." {
             Self::prompt_endpoint_id(template_type)

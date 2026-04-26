@@ -187,12 +187,8 @@ impl SnapshotSelector {
                 std::io::stdout().flush().ok();
                 self.manage_snapshot(item.index).map(Some)
             }
-            SelectionResult::Delete(item) => {
-                Ok(Some(SnapshotManagementAction::Delete(item.index)))
-            }
-            SelectionResult::Rename(item) => {
-                Ok(Some(SnapshotManagementAction::Rename(item.index)))
-            }
+            SelectionResult::Delete(item) => Ok(Some(SnapshotManagementAction::Delete(item.index))),
+            SelectionResult::Rename(item) => Ok(Some(SnapshotManagementAction::Rename(item.index))),
             SelectionResult::Create => Ok(Some(SnapshotManagementAction::CreateSnapshot)),
             SelectionResult::Back => Ok(None),
             SelectionResult::Exit => std::process::exit(0),
@@ -249,17 +245,18 @@ impl SnapshotSelector {
             "Global (~/.claude/settings.json) - User-wide settings",
         ];
 
-        let config_selection = inquire::Select::new("Select configuration to snapshot:", config_options)
-            .with_help_message("↑/↓: Navigate, Enter: Select")
-            .prompt()
-            .map_err(|e| {
-                let msg = e.to_string();
-                if msg.contains("canceled") || msg.contains("cancelled") {
-                    SelectorError::Cancelled
-                } else {
-                    SelectorError::Failed(format!("Selection failed: {}", e))
-                }
-            })?;
+        let config_selection =
+            inquire::Select::new("Select configuration to snapshot:", config_options)
+                .with_help_message("↑/↓: Navigate, Enter: Select")
+                .prompt()
+                .map_err(|e| {
+                    let msg = e.to_string();
+                    if msg.contains("canceled") || msg.contains("cancelled") {
+                        SelectorError::Cancelled
+                    } else {
+                        SelectorError::Failed(format!("Selection failed: {}", e))
+                    }
+                })?;
 
         let settings_path = if config_selection.starts_with("Local") {
             crate::utils::get_local_settings_path()
@@ -326,7 +323,9 @@ impl SnapshotSelector {
 
         // Step 3: Get snapshot name
         let name = inquire::Text::new("Enter snapshot name:")
-            .with_help_message("A descriptive name (e.g., 'development-setup', 'production-config')")
+            .with_help_message(
+                "A descriptive name (e.g., 'development-setup', 'production-config')",
+            )
             .prompt()
             .map_err(|e| {
                 let msg = e.to_string();
@@ -344,7 +343,9 @@ impl SnapshotSelector {
 
         // Get description (optional)
         let description = inquire::Text::new("Enter description (optional):")
-            .with_help_message("Optional description to help you remember what this snapshot is for")
+            .with_help_message(
+                "Optional description to help you remember what this snapshot is for",
+            )
             .prompt()
             .ok()
             .and_then(|d| {

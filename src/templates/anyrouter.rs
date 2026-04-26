@@ -79,7 +79,11 @@ impl Template for AnyRouterTemplate {
     }
 
     fn env_var_names(&self) -> Vec<&'static str> {
-        vec!["ANYROUTER_AUTH_TOKEN", "ANYROUTER_API_KEY", "ANYROUTER_API_TOKEN"]
+        vec![
+            "ANYROUTER_AUTH_TOKEN",
+            "ANYROUTER_API_KEY",
+            "ANYROUTER_API_TOKEN",
+        ]
     }
 
     fn display_name(&self) -> &'static str {

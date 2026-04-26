@@ -324,7 +324,9 @@ pub fn resolve_template_interactive(
 
     // Generic target with variants - prompt for selection
     match template_type {
-        TemplateType::KatCoder => Ok(Box::new(kat_coder::KatCoderTemplate::create_interactively()?)),
+        TemplateType::KatCoder => Ok(Box::new(
+            kat_coder::KatCoderTemplate::create_interactively()?
+        )),
         TemplateType::Kimi => Ok(Box::new(kimi::KimiTemplate::create_interactively()?)),
         TemplateType::Zai => Ok(Box::new(zai::ZaiTemplate::create_interactively()?)),
         TemplateType::AnyRouter => Ok(Box::new(
@@ -341,11 +343,18 @@ pub fn resolve_template_interactive(
 fn is_generic_target(target: &str) -> bool {
     matches!(
         target.to_lowercase().as_str(),
-        "kat-coder" | "katcoder" | "kat"
+        "kat-coder"
+            | "katcoder"
+            | "kat"
             | "kimi"
-            | "zai" | "glm" | "zhipu"
-            | "anyrouter" | "anyr" | "ar"
-            | "openrouter" | "or"
+            | "zai"
+            | "glm"
+            | "zhipu"
+            | "anyrouter"
+            | "anyr"
+            | "ar"
+            | "openrouter"
+            | "or"
     )
 }
 

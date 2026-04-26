@@ -3,7 +3,9 @@ use crate::{
     credentials::{CredentialStore, get_api_key_cli, get_api_key_interactively},
     settings::{ClaudeSettings, format_settings_comparison, format_settings_for_display},
     snapshots::{self, SnapshotScope, SnapshotStore},
-    templates::{TemplateType, get_template_type, resolve_template_cli, resolve_template_interactive},
+    templates::{
+        TemplateType, get_template_type, resolve_template_cli, resolve_template_interactive,
+    },
     utils::{
         backup_settings, confirm_action, get_credentials_dir, get_settings_path, get_snapshots_dir,
     },
@@ -36,7 +38,10 @@ fn inject_common_env_vars(settings: &mut ClaudeSettings) {
         let mut env = get_common_env_vars();
         #[cfg(target_os = "windows")]
         {
-            env.insert("CLAUDE_CODE_USE_POWERSHELL_TOOL".to_string(), "1".to_string());
+            env.insert(
+                "CLAUDE_CODE_USE_POWERSHELL_TOOL".to_string(),
+                "1".to_string(),
+            );
         }
         settings.env = Some(env);
     }
@@ -48,7 +53,11 @@ fn inject_common_env_vars(settings: &mut ClaudeSettings) {
 /// In interactive mode, prompts the user. Returns None if already set or skipped.
 #[cfg(target_os = "windows")]
 fn get_git_bash_path(settings: &ClaudeSettings, cli_mode: bool) -> Result<Option<String>> {
-    if settings.env.as_ref().map_or(false, |e| e.contains_key("CLAUDE_CODE_GIT_BASH_PATH")) {
+    if settings
+        .env
+        .as_ref()
+        .is_some_and(|e| e.contains_key("CLAUDE_CODE_GIT_BASH_PATH"))
+    {
         return Ok(None);
     }
 
@@ -200,16 +209,14 @@ fn prompt_attribution_setting(
 
     options.push("Skip".to_string());
 
-    let selection = match inquire::Select::new(
-        "Configure attribution for commits and PRs?",
-        options,
-    )
-    .with_help_message("Controls whether Claude adds co-authored-by to git commits and PRs")
-    .prompt()
-    {
-        Ok(s) => s,
-        Err(_) => return Ok(template_value),
-    };
+    let selection =
+        match inquire::Select::new("Configure attribution for commits and PRs?", options)
+            .with_help_message("Controls whether Claude adds co-authored-by to git commits and PRs")
+            .prompt()
+        {
+            Ok(s) => s,
+            Err(_) => return Ok(template_value),
+        };
 
     if selection == "Skip" {
         return Ok(template_value);
@@ -247,7 +254,18 @@ pub fn run_command(args: &crate::Cli) -> Result<()> {
             effort,
             api_key,
             no_co_author,
-        } => apply_command(target, scope, model, settings_path, *backup, *yes, *cli, effort, api_key, *no_co_author)?,
+        } => apply_command(
+            target,
+            scope,
+            model,
+            settings_path,
+            *backup,
+            *yes,
+            *cli,
+            effort,
+            api_key,
+            *no_co_author,
+        )?,
         cli::Commands::Credentials { command } => match command {
             cli::CredentialCommands::List => credentials_list_command()?,
             cli::CredentialCommands::Clear { yes } => credentials_clear_command(*yes)?,

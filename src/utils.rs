@@ -217,8 +217,8 @@ pub fn detect_git_bash_paths() -> Vec<PathBuf> {
                 continue;
             }
             let git_exe = PathBuf::from(entry).join("git.exe");
-            if git_exe.exists() {
-                if let Some(parent) = git_exe.parent() {
+            if git_exe.exists()
+                && let Some(parent) = git_exe.parent() {
                     if parent.ends_with("cmd") {
                         if let Some(git_root) = parent.parent() {
                             try_add(git_root.join("bin").join("bash.exe"));
@@ -227,7 +227,6 @@ pub fn detect_git_bash_paths() -> Vec<PathBuf> {
                         try_add(parent.join("bash.exe"));
                     }
                 }
-            }
         }
     }
 
