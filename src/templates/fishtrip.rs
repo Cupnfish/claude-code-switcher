@@ -36,7 +36,7 @@ impl Template for FishtripTemplate {
         let mut settings = ClaudeSettings::new();
 
         if matches!(scope, SnapshotScope::Common | SnapshotScope::All) {
-            settings.model = Some("claude-opus-4-6".to_string());
+            settings.model = Some("claude-opus-4-8[1m]".to_string());
 
             settings.permissions = Some(Permissions {
                 allow: Some(vec![
@@ -67,18 +67,18 @@ impl Template for FishtripTemplate {
                 "ANTHROPIC_BASE_URL".to_string(),
                 "https://api.fishtrip.net".to_string(),
             );
-            env.insert("ANTHROPIC_MODEL".to_string(), "claude-opus-4-6".to_string());
+            env.insert("ANTHROPIC_MODEL".to_string(), "claude-opus-4-8[1m]".to_string());
             env.insert(
                 "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
-                "claude-opus-4-6".to_string(),
+                "claude-opus-4-8[1m]".to_string(),
             );
             env.insert(
                 "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
-                "claude-opus-4-6".to_string(),
+                "claude-opus-4-8[1m]".to_string(),
             );
             env.insert(
                 "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
-                "claude-opus-4-6".to_string(),
+                "claude-opus-4-8[1m]".to_string(),
             );
             env.insert("API_TIMEOUT_MS".to_string(), "600000".to_string());
             env.insert(
