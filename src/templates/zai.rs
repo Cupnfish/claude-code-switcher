@@ -226,6 +226,10 @@ impl Template for ZaiTemplate {
             env.insert("MAX_THINKING_TOKENS".to_string(), "32000".to_string());
             env.insert("ENABLE_STREAMING".to_string(), "true".to_string());
             env.insert("MAX_OUTPUT_TOKENS".to_string(), "128000".to_string());
+            env.insert(
+                "CLAUDE_CODE_MAX_OUTPUT_TOKENS".to_string(),
+                "128000".to_string(),
+            );
             env.insert("MAX_MCP_OUTPUT_TOKENS".to_string(), "64000".to_string());
             env.insert("AUTH_HEADER_MODE".to_string(), "x-api-key".to_string());
             env.insert(
