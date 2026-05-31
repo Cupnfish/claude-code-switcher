@@ -136,6 +136,7 @@ fn prompt_effort_setting(
 
     // Interactive prompt
     let mut options = vec![
+        "max".to_string(),
         "xhigh".to_string(),
         "high".to_string(),
         "medium".to_string(),
