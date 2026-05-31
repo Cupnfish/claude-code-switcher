@@ -1,4 +1,4 @@
-//! Fishtrip AI provider template implementation
+//! BeeAPI AI provider template implementation
 
 use crate::{
     settings::{ClaudeSettings, Permissions},
@@ -7,36 +7,36 @@ use crate::{
 };
 use std::collections::HashMap;
 
-/// Fishtrip AI provider template
+/// BeeAPI AI provider template
 #[derive(Debug, Clone)]
-pub struct FishtripTemplate;
+pub struct BeeApiTemplate;
 
-impl Template for FishtripTemplate {
+impl Template for BeeApiTemplate {
     fn template_type(&self) -> crate::templates::TemplateType {
-        crate::templates::TemplateType::Fishtrip
+        crate::templates::TemplateType::BeeApi
     }
 
     fn env_var_names(&self) -> Vec<&'static str> {
-        vec!["FISHTRIP_API_KEY", "FISHTRIP_AUTH_TOKEN", "FISHTRIP_TOKEN"]
+        vec!["BEEAPI_API_KEY", "BEEAPI_AUTH_TOKEN", "BEEAPI_TOKEN"]
     }
 
     fn display_name(&self) -> &'static str {
-        "Fishtrip"
+        "BeeAPI"
     }
 
     fn description(&self) -> &'static str {
-        "Fishtrip API - Anthropic-compatible endpoint"
+        "BeeAPI - Anthropic-compatible endpoint"
     }
 
     fn api_host(&self) -> Option<&'static str> {
-        Some("api.fishtrip.net")
+        Some("beeapi.ai")
     }
 
     fn create_settings(&self, api_key: &str, scope: &SnapshotScope) -> ClaudeSettings {
         let mut settings = ClaudeSettings::new();
 
         if matches!(scope, SnapshotScope::Common | SnapshotScope::All) {
-            settings.model = Some("claude-opus-4-8[1m]".to_string());
+            settings.model = Some("claude-opus-4-8".to_string());
             settings.effort_level = Some("max".to_string());
 
             settings.permissions = Some(Permissions {
@@ -66,20 +66,20 @@ impl Template for FishtripTemplate {
             env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.to_string());
             env.insert(
                 "ANTHROPIC_BASE_URL".to_string(),
-                "https://api.fishtrip.net".to_string(),
+                "https://beeapi.ai/anthropic".to_string(),
             );
-            env.insert("ANTHROPIC_MODEL".to_string(), "claude-opus-4-8[1m]".to_string());
+            env.insert("ANTHROPIC_MODEL".to_string(), "claude-opus-4-8".to_string());
             env.insert(
                 "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
-                "claude-opus-4-8[1m]".to_string(),
+                "claude-opus-4-8".to_string(),
             );
             env.insert(
                 "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
-                "claude-opus-4-8[1m]".to_string(),
+                "claude-opus-4-8".to_string(),
             );
             env.insert(
                 "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
-                "claude-opus-4-8[1m]".to_string(),
+                "claude-opus-4-8".to_string(),
             );
             env.insert("CLAUDE_CODE_EFFORT_LEVEL".to_string(), "max".to_string());
             env.insert("API_TIMEOUT_MS".to_string(), "600000".to_string());
@@ -94,8 +94,8 @@ impl Template for FishtripTemplate {
     }
 }
 
-/// Create Fishtrip template settings (legacy compatibility function)
-pub fn create_fishtrip_template(api_key: &str, scope: &SnapshotScope) -> ClaudeSettings {
-    let template = FishtripTemplate;
+/// Create BeeAPI template settings (legacy compatibility function)
+pub fn create_beeapi_template(api_key: &str, scope: &SnapshotScope) -> ClaudeSettings {
+    let template = BeeApiTemplate;
     template.create_settings(api_key, scope)
 }

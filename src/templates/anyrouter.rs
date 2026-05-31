@@ -150,6 +150,7 @@ impl Template for AnyRouterTemplate {
 
         if matches!(scope, SnapshotScope::Common | SnapshotScope::All) {
             settings.model = Some(self.region.model_name().to_string());
+            settings.effort_level = Some("max".to_string());
 
             settings.permissions = Some(Permissions {
                 allow: Some(vec![
@@ -200,6 +201,7 @@ impl Template for AnyRouterTemplate {
                 "ANTHROPIC_BETAS".to_string(),
                 "context-1m-2025-08-07".to_string(),
             );
+            env.insert("CLAUDE_CODE_EFFORT_LEVEL".to_string(), "max".to_string());
             settings.env = Some(env);
         }
 

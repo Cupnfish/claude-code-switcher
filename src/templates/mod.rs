@@ -86,6 +86,7 @@ pub enum TemplateType {
     Duojie,
     AnyRouter,
     OpenRouter,
+    BeeApi,
 }
 
 impl<'de> Deserialize<'de> for TemplateType {
@@ -111,6 +112,7 @@ impl<'de> Deserialize<'de> for TemplateType {
             "Duojie" => Ok(TemplateType::Duojie),
             "AnyRouter" => Ok(TemplateType::AnyRouter),
             "OpenRouter" => Ok(TemplateType::OpenRouter),
+            "BeeApi" => Ok(TemplateType::BeeApi),
             _ => Err(serde::de::Error::custom(format!(
                 "unknown template type: {}",
                 s
@@ -153,8 +155,9 @@ impl std::str::FromStr for TemplateType {
                 Ok(TemplateType::AnyRouter)
             }
             "openrouter" | "or" => Ok(TemplateType::OpenRouter),
+            "beeapi" | "bee" => Ok(TemplateType::BeeApi),
             _ => Err(anyhow!(
-                "Unknown template: {}. Available templates: deepseek, glm, k2, k2-thinking, kat-coder, kimi, longcat, fishtrip, fish, minimax, seed-code, zenmux, duojie, anyrouter, openrouter",
+                "Unknown template: {}. Available templates: deepseek, glm, k2, k2-thinking, kat-coder, kimi, longcat, fishtrip, fish, minimax, seed-code, zenmux, duojie, anyrouter, openrouter, beeapi",
                 s
             )),
         }
@@ -176,6 +179,7 @@ impl std::fmt::Display for TemplateType {
             TemplateType::Duojie => write!(f, "duojie"),
             TemplateType::AnyRouter => write!(f, "anyrouter"),
             TemplateType::OpenRouter => write!(f, "openrouter"),
+            TemplateType::BeeApi => write!(f, "beeapi"),
         }
     }
 }
@@ -200,6 +204,7 @@ pub fn get_all_templates() -> Vec<TemplateType> {
         TemplateType::Duojie,
         TemplateType::AnyRouter,
         TemplateType::OpenRouter,
+        TemplateType::BeeApi,
     ]
 }
 
@@ -273,6 +278,7 @@ pub fn get_template_instance_with_input(
         TemplateType::OpenRouter => Box::new(openrouter::OpenRouterTemplate::with_model(
             "anthropic/claude-3.5-sonnet",
         )),
+        TemplateType::BeeApi => Box::new(beeapi::BeeApiTemplate),
     }
 }
 
@@ -373,6 +379,7 @@ pub fn get_template(template_type: &TemplateType) -> fn(&str, &SnapshotScope) ->
         TemplateType::Duojie => create_duojie_template,
         TemplateType::AnyRouter => create_anyrouter_template,
         TemplateType::OpenRouter => create_openrouter_template,
+        TemplateType::BeeApi => create_beeapi_template,
     }
 }
 
@@ -385,6 +392,7 @@ pub mod kat_coder;
 pub mod kimi; // Unified module for all Moonshot services
 pub mod longcat;
 pub mod minimax;
+pub mod beeapi;
 pub mod openrouter;
 pub mod seed_code;
 pub mod zai;
@@ -399,6 +407,7 @@ pub use kat_coder::*;
 pub use kimi::*; // Includes legacy k2 functions
 pub use longcat::*;
 pub use minimax::*;
+pub use beeapi::*;
 pub use openrouter::*;
 pub use seed_code::*;
 pub use zai::*;
