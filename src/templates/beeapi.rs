@@ -37,7 +37,7 @@ impl Template for BeeApiTemplate {
 
         if matches!(scope, SnapshotScope::Common | SnapshotScope::All) {
             settings.model = Some("claude-opus-4-8[1m]".to_string());
-            settings.effort_level = Some("max".to_string());
+            settings.effort_level = Some("xhigh".to_string());
 
             settings.permissions = Some(Permissions {
                 allow: Some(vec![
@@ -81,7 +81,7 @@ impl Template for BeeApiTemplate {
                 "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
                 "claude-opus-4-8[1m]".to_string(),
             );
-            env.insert("CLAUDE_CODE_EFFORT_LEVEL".to_string(), "max".to_string());
+            env.insert("CLAUDE_CODE_EFFORT_LEVEL".to_string(), "xhigh".to_string());
             env.insert("API_TIMEOUT_MS".to_string(), "600000".to_string());
             env.insert(
                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),
