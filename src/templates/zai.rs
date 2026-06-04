@@ -225,6 +225,10 @@ impl Template for ZaiTemplate {
             env.insert("REASONING_EFFORT".to_string(), "ultrathink".to_string());
             env.insert("MAX_THINKING_TOKENS".to_string(), "32000".to_string());
             env.insert("ENABLE_STREAMING".to_string(), "true".to_string());
+            env.insert(
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
+                "185000".to_string(),
+            );
             env.insert("MAX_OUTPUT_TOKENS".to_string(), "128000".to_string());
             env.insert(
                 "CLAUDE_CODE_MAX_OUTPUT_TOKENS".to_string(),
