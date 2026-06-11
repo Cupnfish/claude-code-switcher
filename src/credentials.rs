@@ -37,6 +37,8 @@ pub struct CredentialData {
     pub created_at: String,
     /// Last update timestamp in UTC
     pub updated_at: String,
+    /// Last usage timestamp in UTC (None if never used)
+    pub last_used_at: Option<String>,
     /// Optional metadata for future extensibility
     pub metadata: Option<std::collections::HashMap<String, String>>,
 }
@@ -52,6 +54,7 @@ impl Default for CredentialData {
             template_type: TemplateType::KatCoder,
             created_at: now.clone(),
             updated_at: now,
+            last_used_at: None,
             metadata: None,
         }
     }
@@ -69,6 +72,7 @@ impl CredentialData {
             template_type,
             created_at: now.clone(),
             updated_at: now,
+            last_used_at: None,
             metadata: None,
         }
     }
@@ -101,6 +105,11 @@ impl CredentialData {
     /// Get creation timestamp
     pub fn created_at(&self) -> &str {
         &self.created_at
+    }
+
+    /// Get last usage timestamp
+    pub fn last_used_at(&self) -> Option<&str> {
+        self.last_used_at.as_deref()
     }
 
     /// Get update timestamp
@@ -427,6 +436,14 @@ impl CredentialStore {
         Ok(())
     }
 
+    /// Update last_used_at timestamp for a credential
+    pub fn touch_last_used(&self, credential_id: &str) -> Result<()> {
+        let mut credential = self.store.load(credential_id)?;
+        credential.last_used_at = Some(Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string());
+        self.store.save(&credential)?;
+        Ok(())
+    }
+
     /// Update credential metadata
     pub fn update_metadata(
         &self,
@@ -561,63 +578,9 @@ pub fn get_api_key_interactively(
 
 /// Inner interactive API key selection logic
 fn get_api_key_interactive_inner(template_type: TemplateType) -> Result<String> {
-    // First, try to get API key from environment variables
-    let env_var_names = crate::templates::get_env_var_names(&template_type);
-    let mut env_vars_with_keys = Vec::new();
-
-    // Check each environment variable name in order
-    for env_var_name in &env_var_names {
-        if let Some(api_key) = std::env::var(env_var_name)
-            .ok()
-            .filter(|key| !key.trim().is_empty())
-        {
-            env_vars_with_keys.push((env_var_name, api_key));
-        }
-    }
-
-    // Let user choose between env var and custom API key if env var exists
-    if !env_vars_with_keys.is_empty() {
-        use inquire::Select;
-
-        let mut options = Vec::new();
-        for (env_var_name, _) in &env_vars_with_keys {
-            options.push(format!(
-                "Use API key from environment variable {}",
-                env_var_name
-            ));
-        }
-        options.push("Enter a custom API key".to_string());
-
-        let choice = Select::new("API key source:", options)
-            .prompt()
-            .map_err(|e| anyhow!("Failed to get API key source selection: {}", e))?;
-
-        // Find which env var was selected
-        for (env_var_name, api_key) in &env_vars_with_keys {
-            if choice.contains(&format!(
-                "Use API key from environment variable {}",
-                env_var_name
-            )) {
-                println!("✓ Using API key from environment variable {}", env_var_name);
-                return Ok(api_key.clone());
-            }
-        }
-    }
-
-    // Get saved credentials
-    let _credentials = if let Ok(credential_store) = CredentialStore::new() {
-        credential_store
-            .store
-            .find_by_template_type(&template_type)
-            .unwrap_or_default()
-    } else {
-        Vec::new()
-    };
-
-    // Use new credential selector
-    // Clone template_type for use in the selector and later for saving
+    // Use unified selector that combines env vars, saved credentials, and create
     let template_type_clone = template_type.clone();
-    match crate::selectors::credential::CredentialSelector::select_api_key(template_type)? {
+    match crate::selectors::credential::CredentialSelector::select_api_key_unified(template_type)? {
         Some(api_key) => {
             // Auto-save the credential if it's new
             if let Ok(credential_store) = CredentialStore::new()
@@ -638,7 +601,7 @@ fn get_api_key_interactive_inner(template_type: TemplateType) -> Result<String> 
 }
 
 /// Mask API key for display (show first 4 and last 4 characters)
-fn mask_api_key(api_key: &str) -> String {
+pub(crate) fn mask_api_key(api_key: &str) -> String {
     if api_key.len() <= 8 {
         "••••••••".to_string()
     } else {

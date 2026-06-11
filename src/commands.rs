@@ -13,6 +13,7 @@ use crate::{
 use anyhow::Result;
 use console::style;
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::PathBuf;
 
 /// Common environment variables that should be added to all templates
@@ -74,6 +75,11 @@ fn get_git_bash_path(settings: &ClaudeSettings, cli_mode: bool) -> Result<Option
     let mut options: Vec<String> = detected.iter().map(|p| p.display().to_string()).collect();
     options.push("Enter custom path...".to_string());
     options.push("Skip".to_string());
+
+    // Clear screen to avoid visual corruption from previous interactive prompts
+    // (e.g. crossterm-based Selector for API key selection)
+    print!("\x1b[2J\x1b[H");
+    std::io::stdout().flush().ok();
 
     let selection = match inquire::Select::new(
         "Select Git Bash path for CLAUDE_CODE_GIT_BASH_PATH:",

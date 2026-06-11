@@ -10,7 +10,7 @@ use crate::selectors::error::SelectorError;
 use crossterm::{
     ExecutableCommand, QueueableCommand,
     cursor::{Hide, MoveTo, Show},
-    event::{Event, KeyCode, KeyEvent, KeyModifiers, read},
+    event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, read},
     style::{Color, Print, ResetColor, SetForegroundColor},
     terminal::{self, Clear, ClearType},
 };
@@ -273,6 +273,11 @@ impl<'a, T: SelectableItem + Clone> Selector<'a, T> {
         // Main event loop
         let result = loop {
             if let Event::Key(key_event) = read()? {
+                // Only process key press events; ignore release/repeat to avoid
+                // spurious actions from leftover events after inquire prompts.
+                if key_event.kind != KeyEventKind::Press {
+                    continue;
+                }
                 match self.handle_key_event(key_event, &mut state)? {
                     KeyHandleResult::Continue => {
                         self.render(&mut stdout, &state)?;
