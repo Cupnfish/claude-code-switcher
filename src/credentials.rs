@@ -586,9 +586,18 @@ fn get_api_key_interactive_inner(template_type: TemplateType) -> Result<String> 
             if let Ok(credential_store) = CredentialStore::new()
                 && !credential_store.has_api_key(&api_key, &template_type_clone)
             {
+                let masked = mask_api_key(&api_key);
                 let default_name = format!("{} API Key", template_type_clone);
+                let name = inquire::Text::new("Save as (alias):")
+                    .with_default(&default_name)
+                    .with_help_message(
+                        format!("Enter an alias for {} to identify it later", masked).as_str(),
+                    )
+                    .prompt()
+                    .unwrap_or(default_name);
+                let name = name.trim().to_string();
                 if credential_store
-                    .create_credential(default_name, &api_key, template_type_clone)
+                    .create_credential(name, &api_key, template_type_clone)
                     .is_ok()
                 {
                     println!("✓ API key saved automatically for future use.");
