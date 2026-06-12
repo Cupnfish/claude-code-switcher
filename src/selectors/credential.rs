@@ -13,6 +13,7 @@ use crate::{
     },
     templates,
 };
+use std::collections::HashSet;
 use std::io::{self, Write};
 use uuid::Uuid;
 
@@ -380,6 +381,28 @@ impl CredentialSelector {
             let pb = priority(b);
             pb.cmp(&pa)
         });
+
+        // 4. Deduplicate: env var keys take priority; also dedup within saved credentials
+        let env_keys: HashSet<String> = sources
+            .iter()
+            .filter_map(|s| match s {
+                ApiKeySource::EnvVar { api_key, .. } => Some(api_key.clone()),
+                _ => None,
+            })
+            .collect();
+
+        let mut seen = env_keys;
+        let mut deduped = Vec::new();
+        for source in sources {
+            let key = match &source {
+                ApiKeySource::EnvVar { api_key, .. } => api_key.clone(),
+                ApiKeySource::Saved { credential } => credential.api_key().to_string(),
+            };
+            if seen.insert(key) {
+                deduped.push(source);
+            }
+        }
+        sources = deduped;
 
         Ok(sources)
     }
