@@ -394,12 +394,17 @@ impl CredentialSelector {
         let mut seen = env_keys;
         let mut deduped = Vec::new();
         for source in sources {
-            let key = match &source {
-                ApiKeySource::EnvVar { api_key, .. } => api_key.clone(),
-                ApiKeySource::Saved { credential } => credential.api_key().to_string(),
-            };
-            if seen.insert(key) {
-                deduped.push(source);
+            match &source {
+                ApiKeySource::EnvVar { .. } => {
+                    // Always keep env var entries
+                    deduped.push(source);
+                }
+                ApiKeySource::Saved { credential } => {
+                    // Only keep saved entries if not duplicating an env var or another saved entry
+                    if seen.insert(credential.api_key().to_string()) {
+                        deduped.push(source);
+                    }
+                }
             }
         }
         sources = deduped;
