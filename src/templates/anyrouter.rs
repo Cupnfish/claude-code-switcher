@@ -42,7 +42,7 @@ impl AnyRouterRegion {
     }
 
     pub fn model_name(&self) -> &'static str {
-        "claude-fable-5"
+        "claude-fable-5[1m]"
     }
 
     pub fn api_host(&self) -> &'static str {
