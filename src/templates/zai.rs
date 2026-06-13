@@ -28,10 +28,10 @@ impl ZaiRegion {
     pub fn description(&self) -> &'static str {
         match self {
             ZaiRegion::China => {
-                "Zhipu AI GLM-5.1 in China - Coding aligned with Claude Opus 4.6, with thinking capabilities"
+                "Zhipu AI GLM-5.2 in China - Coding aligned with Claude Opus 4.6, 1M context with thinking capabilities"
             }
             ZaiRegion::International => {
-                "Zhipu AI GLM-5.1 International - Global access with optimized routing"
+                "Zhipu AI GLM-5.2 International - Global access with 1M context, optimized routing"
             }
         }
     }
@@ -45,8 +45,8 @@ impl ZaiRegion {
 
     pub fn model_name(&self) -> &'static str {
         match self {
-            ZaiRegion::China => "glm-5.1",
-            ZaiRegion::International => "glm-5.1",
+            ZaiRegion::China => "glm-5.2[1m]",
+            ZaiRegion::International => "glm-5.2[1m]",
         }
     }
 
@@ -211,7 +211,7 @@ impl Template for ZaiTemplate {
             );
             env.insert(
                 "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
-                "GLM-4.7".to_string(),
+                "glm-4.5-air".to_string(),
             );
             env.insert(
                 "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
@@ -222,12 +222,11 @@ impl Template for ZaiTemplate {
                 self.region.model_name().to_string(),
             );
             env.insert("ENABLE_THINKING".to_string(), "true".to_string());
-            env.insert("REASONING_EFFORT".to_string(), "ultrathink".to_string());
-            env.insert("MAX_THINKING_TOKENS".to_string(), "32000".to_string());
+            env.insert("REASONING_EFFORT".to_string(), "max".to_string());
             env.insert("ENABLE_STREAMING".to_string(), "true".to_string());
             env.insert(
                 "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
-                "185000".to_string(),
+                "1000000".to_string(),
             );
             env.insert("MAX_OUTPUT_TOKENS".to_string(), "128000".to_string());
             env.insert(

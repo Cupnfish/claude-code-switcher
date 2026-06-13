@@ -88,7 +88,7 @@ ccs --help
 ### 应用预设模板
 
 ```bash
-# 智谱 GLM-5.1（推荐）- Coding 能力对齐 Claude Opus 4.6，支持 200K 上下文
+# 智谱 GLM-5.2（推荐）- Coding 能力对齐 Claude Opus 4.6，支持 1M 上下文
 ccs apply zai
 # 别名：glm, zhipu
 
@@ -136,7 +136,7 @@ ccs apply openrouter
 
 | 提供商 | 命令 | 别名 | 特点 | 推荐度 |
 |--------|--------|------|------|--------|
-| **智谱 GLM** | `ccs apply zai` | `glm`, `zhipu` | GLM-5.1，200K 上下文，128K 输出，Coding 对齐 Claude Opus 4.6 | ⭐⭐⭐⭐⭐ |
+| **智谱 GLM** | `ccs apply zai` | `glm`, `zhipu` | GLM-5.2，1M 上下文，128K 输出，Coding 对齐 Claude Opus 4.6 | ⭐⭐⭐⭐⭐ |
 | **MiniMax** | `ccs apply minimax` | - | Anthropic 兼容，支持中国区/国际区 | ⭐⭐⭐⭐ |
 | **DeepSeek V4** | `ccs apply deepseek` | `ds` | 思考模式，V4 Pro/Flash 模型，1M 上下文，价格优惠 | ⭐⭐⭐⭐ |
 | **OpenRouter** | `ccs apply openrouter` | `or` | 开放模型选择，支持多种模型 | ⭐⭐⭐⭐ |
