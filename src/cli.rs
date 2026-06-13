@@ -21,10 +21,13 @@ pub enum Commands {
     /// Apply a snapshot or template [alias: a]
     #[command(alias = "a")]
     Apply {
-        /// Snapshot name or template type (deepseek, glm, k2, k2-thinking, kat-coder-pro, kat-coder-air, kat-coder, kimi, longcat, fishtrip, fish, minimax, seed-code, zenmux, anyrouter, openrouter, beeapi)
+        /// Snapshot name or template type
+        /// (deepseek, glm, k2, k2-thinking, kat-coder, kimi, longcat, fishtrip,
+        /// minimax, seed-code, zenmux, duojie, anyrouter, openrouter, beeapi, day77)
         target: String,
 
-        /// What to include in the snapshot (default: common)
+        /// What to include (default: common). env = only env vars; common =
+        /// env+model+permissions+hooks; all = everything.
         #[arg(long, default_value = "common", help = "Scope of settings to include")]
         scope: SnapshotScope,
 
@@ -40,25 +43,37 @@ pub enum Commands {
         #[arg(long, help = "Create backup of current settings before applying")]
         backup: bool,
 
-        /// Skip confirmation prompt
-        #[arg(long, help = "Skip confirmation prompt")]
+        /// Skip the confirmation prompt (apply directly)
+        #[arg(long, short = 'y', help = "Skip confirmation / apply directly")]
         yes: bool,
 
-        /// CLI mode: skip all interactive prompts, use parameters/defaults
-        #[arg(long, help = "Non-interactive mode: skip prompts, use params/defaults")]
+        /// Deprecated: non-interactive mode. Now automatic when stdin isn't a TTY.
+        #[arg(long, hide = true, help = "Non-interactive mode (deprecated)")]
         cli: bool,
 
-        /// Effort level (xhigh/high/medium/low)
-        #[arg(long, help = "Set effort level (default: xhigh in CLI mode)")]
+        /// Effort level override (max/xhigh/high/medium/low)
+        #[arg(long, help = "Set effort level (overrides the default in your config)")]
         effort: Option<String>,
 
-        /// API key to use (skips interactive key selection)
-        #[arg(long, help = "API key to use (skips interactive selection)")]
+        /// API key to use (skips interactive selection)
+        #[arg(long, visible_alias = "key", help = "API key to use (skips interactive selection)")]
         api_key: Option<String>,
 
-        /// Disable co-authored-by attribution in commits
-        #[arg(long, help = "Disable co-authored-by attribution in commits")]
+        /// Disable co-authored-by attribution in commits/PRs
+        #[arg(long, help = "Disable co-authored-by attribution")]
         no_co_author: bool,
+
+        /// Force the API-key picker even if a key is remembered
+        #[arg(long, help = "Force the API-key picker (ignore remembered key)")]
+        switch_key: bool,
+
+        /// Preview the result without writing anything
+        #[arg(long, help = "Preview changes without writing settings")]
+        dry_run: bool,
+
+        /// Specific variant alias for generic targets (e.g. zai-china, k2, kat-coder-air)
+        #[arg(long, help = "Specific variant alias (e.g. zai-china, k2)")]
+        variant: Option<String>,
     },
 
     /// Manage saved credentials [aliases: creds, cred]
@@ -68,6 +83,41 @@ pub enum Commands {
         #[command(subcommand)]
         command: CredentialCommands,
     },
+
+    /// View or edit persistent preferences [alias: cfg]
+    #[command(alias = "cfg")]
+    Config(ConfigArgs),
+
+    /// Show the currently-active provider [alias: status]
+    #[command(alias = "status")]
+    Current,
+}
+
+/// Arguments for `ccs config`
+#[derive(Args, Clone, Debug)]
+pub struct ConfigArgs {
+    /// Set the default effort level (max/xhigh/high/medium/low)
+    #[arg(long, help = "Set default effort (max/xhigh/high/medium/low)")]
+    pub effort: Option<String>,
+
+    /// Enable or disable co-authored-by in commits/PRs. Pass without a value to
+    /// enable (`--co-author`), or `--co-author false` to disable.
+    #[arg(
+        long,
+        action = clap::ArgAction::Set,
+        num_args = 0..=1,
+        default_missing_value = "true",
+        help = "Enable/disable co-authored-by (true|false)"
+    )]
+    pub co_author: Option<bool>,
+
+    /// Set the default apply scope (env/common/all)
+    #[arg(long, help = "Set default apply scope (env/common/all)")]
+    pub scope: Option<SnapshotScope>,
+
+    /// Reset all preferences to defaults
+    #[arg(long, help = "Reset all preferences to defaults")]
+    pub reset: bool,
 }
 
 /// Credential management commands
@@ -83,58 +133,4 @@ pub enum CredentialCommands {
         #[arg(long, help = "Skip confirmation prompt")]
         yes: bool,
     },
-}
-
-/// Arguments for snapshot creation
-#[derive(Args, Clone)]
-pub struct SnapArgs {
-    /// Name for the snapshot
-    pub name: String,
-
-    /// What to include in the snapshot (default: common)
-    #[arg(
-        long,
-        default_value = "common",
-        help = "Scope of settings to include in snapshot"
-    )]
-    pub scope: SnapshotScope,
-
-    /// Path to settings file (default: .claude/settings.json)
-    #[arg(long, help = "Path to settings file (default: .claude/settings.json)")]
-    pub settings_path: Option<PathBuf>,
-
-    /// Description for the snapshot
-    #[arg(long, help = "Description for the snapshot")]
-    pub description: Option<String>,
-
-    /// Overwrite existing snapshot with same name
-    #[arg(long, help = "Overwrite existing snapshot with same name")]
-    pub overwrite: bool,
-}
-
-/// Arguments for applying snapshots/templates
-#[derive(Args, Clone)]
-pub struct ApplyArgs {
-    /// Snapshot name or template type
-    pub target: String,
-
-    /// What to include in the snapshot (default: common)
-    #[arg(long, default_value = "common", help = "Scope of settings to include")]
-    pub scope: SnapshotScope,
-
-    /// Override model setting
-    #[arg(long, help = "Override model setting")]
-    pub model: Option<String>,
-
-    /// Path to settings file (default: .claude/settings.json)
-    #[arg(long, help = "Path to settings file (default: .claude/settings.json)")]
-    pub settings_path: Option<PathBuf>,
-
-    /// Backup current settings before applying
-    #[arg(long, help = "Create backup of current settings before applying")]
-    pub backup: bool,
-
-    /// Skip confirmation prompt
-    #[arg(long, help = "Skip confirmation prompt")]
-    pub yes: bool,
 }

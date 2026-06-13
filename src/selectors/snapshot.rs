@@ -1,7 +1,9 @@
-//! Snapshot selector using the unified selector framework
+//! Snapshot management browser (inquire-based).
+//!
+//! Used by `ccs list`. Applying a snapshot by name goes through
+//! [`crate::commands::apply_command`].
 
 use crate::selectors::{
-    base::{SelectableItem, SelectionResult, Selector, SelectorConfig, prompt_rename},
     confirmation::ConfirmationService,
     error::{SelectorError, SelectorResult},
 };
@@ -11,9 +13,24 @@ use crate::{
     snapshots::{Snapshot, SnapshotScope, SnapshotStore},
     utils::get_snapshots_dir,
 };
+use inquire::InquireError;
 use std::io::Write;
 
-/// Action for snapshot management
+/// Inquire selection wrapper that carries its own index/flag, so selection is
+/// unambiguous even when two snapshots share a name.
+struct Choice {
+    index: usize,
+    is_create: bool,
+    label: String,
+}
+
+impl std::fmt::Display for Choice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)
+    }
+}
+
+/// Action for snapshot management.
 #[derive(Debug, Clone)]
 pub enum SnapshotManagementAction {
     Apply(usize),
@@ -24,31 +41,10 @@ pub enum SnapshotManagementAction {
     Exit,
 }
 
-/// Snapshot selector using the unified framework
+/// Snapshot management browser.
 pub struct SnapshotSelector {
     snapshots: Vec<Snapshot>,
     store: SnapshotStore,
-}
-
-/// Display wrapper for snapshots
-#[derive(Clone, Debug)]
-struct SnapshotDisplayItem {
-    index: usize,
-    snapshot: Snapshot,
-}
-
-impl SelectableItem for SnapshotDisplayItem {
-    fn display_name(&self) -> String {
-        format!("{} ({})", self.snapshot.name, self.snapshot.scope)
-    }
-
-    fn format_for_list(&self) -> String {
-        self.display_name()
-    }
-
-    fn id(&self) -> Option<String> {
-        Some(self.snapshot.id.clone())
-    }
 }
 
 impl SnapshotSelector {
@@ -118,7 +114,7 @@ impl SnapshotSelector {
         Ok(())
     }
 
-    /// Simple snapshot selection (for applying snapshots)
+    /// Simple snapshot selection (Esc cancels).
     pub fn select_snapshot() -> SelectorResult<Option<Snapshot>> {
         let selector = Self::new()?;
 
@@ -127,73 +123,68 @@ impl SnapshotSelector {
             return Ok(None);
         }
 
-        let items: Vec<SnapshotDisplayItem> = selector
+        let choices: Vec<Choice> = selector
             .snapshots
             .iter()
             .enumerate()
-            .map(|(i, s)| SnapshotDisplayItem {
-                index: i,
-                snapshot: s.clone(),
+            .map(|(index, s)| Choice {
+                index,
+                is_create: false,
+                label: format!("{} ({})", s.name, s.scope),
             })
             .collect();
 
-        let config = SelectorConfig {
-            allow_management: false,
-            ..SelectorConfig::default()
-        };
-
-        let mut sel = Selector::new("Select a snapshot to apply:", items).with_config(config);
-
-        match sel.prompt()? {
-            SelectionResult::Selected(item) => Ok(Some(item.snapshot)),
-            SelectionResult::Back => Ok(None),
-            SelectionResult::Exit => {
-                println!("Operation cancelled.");
-                std::process::exit(0);
+        match inquire::Select::new("Select a snapshot to apply:", choices)
+            .with_help_message("↑/↓ navigate, Enter select, Esc cancel")
+            .prompt()
+        {
+            Ok(choice) => Ok(Some(selector.snapshots[choice.index].clone())),
+            Err(InquireError::OperationCanceled) | Err(InquireError::OperationInterrupted) => {
+                Ok(None)
             }
-            _ => Ok(None),
+            Err(e) => Err(SelectorError::Failed(format!("Selection failed: {}", e))),
         }
     }
 
-    /// Select snapshot action using the selector framework
+    /// Pick a snapshot from the list, then open its action menu.
+    /// Returns `None` on Esc (exits the management loop).
     fn select_snapshot_action(&mut self) -> SelectorResult<Option<SnapshotManagementAction>> {
-        let snapshot_items: Vec<SnapshotDisplayItem> = self
+        let mut choices: Vec<Choice> = self
             .snapshots
             .iter()
             .enumerate()
-            .map(|(i, s)| SnapshotDisplayItem {
-                index: i,
-                snapshot: s.clone(),
+            .map(|(index, s)| Choice {
+                index,
+                is_create: false,
+                label: format!("{} ({})", s.name, s.scope),
             })
             .collect();
+        choices.push(Choice {
+            index: 0,
+            is_create: true,
+            label: "➕ Create new snapshot...".to_string(),
+        });
 
-        let title = format!(
-            "Select a snapshot to manage ({} total):",
-            self.snapshots.len()
-        );
-
-        let config = SelectorConfig {
-            allow_create: true,
-            show_filter: true,
-            ..SelectorConfig::default()
+        let title = format!("Select a snapshot to manage ({} total):", self.snapshots.len());
+        let choice = match inquire::Select::new(&title, choices)
+            .with_help_message("↑/↓ navigate, Enter select, Esc exit")
+            .prompt()
+        {
+            Ok(c) => c,
+            Err(InquireError::OperationCanceled) | Err(InquireError::OperationInterrupted) => {
+                return Ok(None);
+            }
+            Err(e) => return Err(SelectorError::Failed(format!("Selection failed: {}", e))),
         };
 
-        let mut selector = Selector::new(&title, snapshot_items).with_config(config);
-
-        match selector.prompt()? {
-            SelectionResult::Selected(item) | SelectionResult::ViewDetails(item) => {
-                // Clear screen before showing details
-                print!("\x1b[2J\x1b[H");
-                std::io::stdout().flush().ok();
-                self.manage_snapshot(item.index).map(Some)
-            }
-            SelectionResult::Delete(item) => Ok(Some(SnapshotManagementAction::Delete(item.index))),
-            SelectionResult::Rename(item) => Ok(Some(SnapshotManagementAction::Rename(item.index))),
-            SelectionResult::Create => Ok(Some(SnapshotManagementAction::CreateSnapshot)),
-            SelectionResult::Back => Ok(None),
-            SelectionResult::Exit => std::process::exit(0),
-            _ => Ok(None),
+        if choice.is_create {
+            return Ok(Some(SnapshotManagementAction::CreateSnapshot));
         }
+
+        // Clear screen before showing the action menu.
+        print!("\x1b[2J\x1b[H");
+        std::io::stdout().flush().ok();
+        self.manage_snapshot(choice.index).map(Some)
     }
 
     /// Show snapshot details and action menu
@@ -507,7 +498,14 @@ impl SnapshotSelector {
         }
 
         let snapshot = &self.snapshots[index];
-        let new_name = prompt_rename(&snapshot.name, "snapshot")?;
+        let new_name = match prompt_rename(&snapshot.name) {
+            Ok(n) => n,
+            Err(SelectorError::Cancelled) => {
+                println!("Rename cancelled.");
+                return Ok(Some(true));
+            }
+            Err(e) => return Err(e),
+        };
 
         if new_name != snapshot.name {
             // Check if snapshot already exists with new name
@@ -539,5 +537,27 @@ impl SnapshotSelector {
         }
 
         Ok(Some(true))
+    }
+}
+
+/// Prompt for a new name. Esc cancels (returns [`SelectorError::Cancelled`]).
+fn prompt_rename(current: &str) -> SelectorResult<String> {
+    match inquire::Text::new("Rename:")
+        .with_default(current)
+        .with_help_message("Enter new name, Esc to cancel")
+        .prompt()
+    {
+        Ok(s) => {
+            let trimmed = s.trim().to_string();
+            if trimmed.is_empty() {
+                Err(SelectorError::InvalidInput("Name cannot be empty".to_string()))
+            } else {
+                Ok(trimmed)
+            }
+        }
+        Err(InquireError::OperationCanceled) | Err(InquireError::OperationInterrupted) => {
+            Err(SelectorError::Cancelled)
+        }
+        Err(e) => Err(SelectorError::Failed(format!("Input failed: {}", e))),
     }
 }

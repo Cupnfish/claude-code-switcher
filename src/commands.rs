@@ -1,19 +1,21 @@
 use crate::{
     Configurable, CredentialManager, cli,
-    credentials::{CredentialStore, get_api_key_cli, get_api_key_interactively},
-    settings::{ClaudeSettings, format_settings_comparison, format_settings_for_display},
+    credentials::{CredentialStore, mask_api_key, resolve_api_key},
+    prefs::{KeyRef, Prefs},
+    settings::{Attribution, ClaudeSettings},
     snapshots::{self, SnapshotScope, SnapshotStore},
     templates::{
-        TemplateType, get_template_type, resolve_template_cli, resolve_template_interactive,
+        TemplateType, get_all_templates, get_template_instance, get_template_instance_with_input,
+        get_template_type, is_generic_target, variant_options,
     },
     utils::{
-        backup_settings, confirm_action, get_credentials_dir, get_settings_path, get_snapshots_dir,
+        backup_settings, confirm_action, get_credentials_dir, get_settings_path,
+        get_snapshots_dir,
     },
 };
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use console::style;
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::PathBuf;
 
 /// Common environment variables that should be added to all templates
@@ -23,8 +25,8 @@ fn get_common_env_vars() -> HashMap<String, String> {
     env
 }
 
-/// Inject common environment variables into settings
-/// Does not overwrite keys that are already set by the template
+/// Inject common environment variables into settings.
+/// Does not overwrite keys that are already set by the template.
 fn inject_common_env_vars(settings: &mut ClaudeSettings) {
     if let Some(ref mut env) = settings.env {
         for (key, value) in get_common_env_vars() {
@@ -48,10 +50,11 @@ fn inject_common_env_vars(settings: &mut ClaudeSettings) {
     }
 }
 
-/// Get Git Bash path for CLAUDE_CODE_GIT_BASH_PATH (Windows only)
+/// Get Git Bash path for CLAUDE_CODE_GIT_BASH_PATH (Windows only).
 ///
-/// Checks template settings and system env first. In CLI mode, auto-detects.
-/// In interactive mode, prompts the user. Returns None if already set or skipped.
+/// Checks template settings and system env first. In non-interactive mode,
+/// auto-detects. In interactive mode, prompts the user. Returns None if already
+/// set or skipped.
 #[cfg(target_os = "windows")]
 fn get_git_bash_path(settings: &ClaudeSettings, cli_mode: bool) -> Result<Option<String>> {
     if settings
@@ -75,11 +78,6 @@ fn get_git_bash_path(settings: &ClaudeSettings, cli_mode: bool) -> Result<Option
     let mut options: Vec<String> = detected.iter().map(|p| p.display().to_string()).collect();
     options.push("Enter custom path...".to_string());
     options.push("Skip".to_string());
-
-    // Clear screen to avoid visual corruption from previous interactive prompts
-    // (e.g. crossterm-based Selector for API key selection)
-    print!("\x1b[2J\x1b[H");
-    std::io::stdout().flush().ok();
 
     let selection = match inquire::Select::new(
         "Select Git Bash path for CLAUDE_CODE_GIT_BASH_PATH:",
@@ -123,133 +121,10 @@ fn get_git_bash_path(_settings: &ClaudeSettings, _cli_mode: bool) -> Result<Opti
     Ok(None)
 }
 
-/// Prompt user to select effort level
-fn prompt_effort_setting(
-    template_effort: Option<String>,
-    existing_effort: Option<String>,
-    effort_param: Option<&str>,
-    cli_mode: bool,
-) -> Result<Option<String>> {
-    // CLI mode: use param or default to xhigh
-    if cli_mode {
-        return Ok(Some(effort_param.unwrap_or("xhigh").to_string()));
-    }
-
-    // If --effort provided in interactive mode, use it directly
-    if let Some(level) = effort_param {
-        return Ok(Some(level.to_string()));
-    }
-
-    // Interactive prompt
-    let mut options = vec![
-        "max".to_string(),
-        "xhigh".to_string(),
-        "high".to_string(),
-        "medium".to_string(),
-        "low".to_string(),
-    ];
-
-    if let Some(ref e) = existing_effort {
-        options.insert(0, format!("Keep existing ({})", e));
-    }
-
-    options.push("Skip".to_string());
-
-    let selection = match inquire::Select::new("Select effort level:", options)
-        .with_help_message("Controls reasoning depth for Claude Code")
-        .prompt()
-    {
-        Ok(s) => s,
-        Err(_) => return Ok(template_effort),
-    };
-
-    if selection == "Skip" {
-        return Ok(template_effort);
-    }
-
-    if selection.starts_with("Keep existing") {
-        return Ok(existing_effort);
-    }
-
-    Ok(Some(selection))
-}
-
-/// Prompt user to configure attribution setting
-fn prompt_attribution_setting(
-    template_value: Option<crate::settings::Attribution>,
-    existing_value: Option<crate::settings::Attribution>,
-    no_co_author: bool,
-    cli_mode: bool,
-) -> Result<Option<crate::settings::Attribution>> {
-    use crate::settings::Attribution;
-
-    // If --no-co-author flag is set, disable attribution
-    if no_co_author {
-        return Ok(Some(Attribution {
-            commit: Some(String::new()),
-            pr: Some(String::new()),
-        }));
-    }
-
-    // CLI mode without flag: disable co-author by default
-    if cli_mode {
-        return Ok(Some(Attribution {
-            commit: Some(String::new()),
-            pr: Some(String::new()),
-        }));
-    }
-
-    // Interactive prompt
-    let mut options = vec![
-        "Disable co-author".to_string(),
-        "Enable co-author".to_string(),
-    ];
-
-    if existing_value.is_some() {
-        let display = match &existing_value {
-            Some(a) if a.commit.as_deref() == Some("") => "disabled".to_string(),
-            Some(_) => "custom".to_string(),
-            None => "default".to_string(),
-        };
-        options.insert(0, format!("Keep existing ({})", display));
-    }
-
-    options.push("Skip".to_string());
-
-    let selection =
-        match inquire::Select::new("Configure attribution for commits and PRs?", options)
-            .with_help_message("Controls whether Claude adds co-authored-by to git commits and PRs")
-            .prompt()
-        {
-            Ok(s) => s,
-            Err(_) => return Ok(template_value),
-        };
-
-    if selection == "Skip" {
-        return Ok(template_value);
-    }
-
-    if selection.starts_with("Keep existing") {
-        return Ok(existing_value);
-    }
-
-    if selection == "Disable co-author" {
-        Ok(Some(Attribution {
-            commit: Some(String::new()),
-            pr: Some(String::new()),
-        }))
-    } else {
-        // Enable - omit attribution to use Claude Code's default behavior
-        Ok(None)
-    }
-}
-
 /// Run a command based on CLI arguments
 pub fn run_command(args: &crate::Cli) -> Result<()> {
     match &args.command {
-        cli::Commands::List => {
-            list_command()?;
-        }
+        cli::Commands::List => list_command()?,
         cli::Commands::Apply {
             target,
             scope,
@@ -261,6 +136,9 @@ pub fn run_command(args: &crate::Cli) -> Result<()> {
             effort,
             api_key,
             no_co_author,
+            switch_key,
+            dry_run,
+            variant,
         } => apply_command(
             target,
             scope,
@@ -272,30 +150,30 @@ pub fn run_command(args: &crate::Cli) -> Result<()> {
             effort,
             api_key,
             *no_co_author,
+            *switch_key,
+            *dry_run,
+            variant,
         )?,
         cli::Commands::Credentials { command } => match command {
             cli::CredentialCommands::List => credentials_list_command()?,
             cli::CredentialCommands::Clear { yes } => credentials_clear_command(*yes)?,
         },
+        cli::Commands::Config(cfg) => config_command(cfg)?,
+        cli::Commands::Current => current_command()?,
     }
     Ok(())
 }
 
 /// List available snapshots
 pub fn list_command() -> Result<()> {
-    // Interactive snapshot browser
     println!("📸 Snapshot Browser");
     println!();
 
     let mut selector = crate::selectors::snapshot::SnapshotSelector::new()?;
 
-    // Run the interactive selector
     match selector.run_management() {
-        Ok(()) => {
-            println!("\n👋 Goodbye!");
-        }
+        Ok(()) => println!("\n👋 Goodbye!"),
         Err(e) => {
-            // Check if this is a selector cancellation error
             let error_str = e.to_string();
             if error_str.contains("User cancelled selection") {
                 println!("\n👋 Cancelled. See you next time!");
@@ -319,14 +197,12 @@ pub fn snap_command(
     let settings_path = get_settings_path(settings_path.clone());
     let settings = ClaudeSettings::from_file(&settings_path)?;
 
-    // Capture environment variables if needed
     let mut snapshot_settings = settings;
-
     if matches!(scope, SnapshotScope::All | SnapshotScope::Env) {
         snapshot_settings.env = Some(ClaudeSettings::capture_environment());
     }
 
-    let snapshots_dir = crate::utils::get_snapshots_dir();
+    let snapshots_dir = get_snapshots_dir();
     let store = SnapshotStore::new(snapshots_dir);
 
     if store.exists_by_name(name)
@@ -356,7 +232,10 @@ pub fn snap_command(
     Ok(())
 }
 
+// ── apply ────────────────────────────────────────────────────────────────────
+
 /// Apply a snapshot or template
+#[allow(clippy::too_many_arguments)]
 pub fn apply_command(
     target: &str,
     scope: &SnapshotScope,
@@ -368,11 +247,13 @@ pub fn apply_command(
     effort: &Option<String>,
     api_key: &Option<String>,
     no_co_author: bool,
+    switch_key: bool,
+    dry_run: bool,
+    variant: &Option<String>,
 ) -> Result<()> {
     let settings_path = get_settings_path(settings_path.clone());
-    let yes = yes || cli; // CLI mode implies --yes
 
-    // Try to parse as template type first
+    // Try to parse as a template first
     if let Ok(template_type) = get_template_type(target) {
         return apply_template_command(
             &template_type,
@@ -386,14 +267,161 @@ pub fn apply_command(
             effort,
             api_key,
             no_co_author,
+            switch_key,
+            dry_run,
+            variant,
         );
     }
 
-    // Otherwise treat as snapshot name
+    // Otherwise treat as a snapshot name
     apply_snapshot_command(target, scope, model, &settings_path, backup, yes)
 }
 
+/// One-time first-run onboarding for global defaults.
+fn onboard_prefs(prefs: &mut Prefs) -> Result<()> {
+    println!(
+        "{} First run — setting your defaults (saved to {})",
+        style("👋").cyan(),
+        Prefs::path().display()
+    );
+
+    let effort_options = vec!["max", "xhigh", "high", "medium", "low"];
+    let effort = inquire::Select::new("Default reasoning effort:", effort_options)
+        .with_help_message("Controls Claude Code thinking depth")
+        .prompt()
+        .map_err(|e| anyhow!("Failed to read effort: {}", e))?;
+    prefs.default_effort = Some(effort.to_string());
+
+    let co_author = inquire::Confirm::new("Enable co-authored-by in git commits/PRs?")
+        .with_default(false)
+        .prompt()
+        .unwrap_or(false);
+    prefs.default_co_author = co_author;
+
+    Ok(())
+}
+
+/// Resolve effort: flag → prefs default → (non-interactive fallback) → None.
+fn resolve_effort(flag: Option<&str>, prefs: &Prefs, non_interactive: bool) -> Option<String> {
+    if let Some(e) = flag.map(str::trim).filter(|e| !e.is_empty()) {
+        return Some(e.to_string());
+    }
+    if let Some(e) = &prefs.default_effort {
+        return Some(e.clone());
+    }
+    if non_interactive {
+        return Some("xhigh".to_string());
+    }
+    None
+}
+
+/// Resolve whether co-author should be OFF: --no-co-author → off; else honor
+/// prefs (default_co_author false means off).
+fn resolve_co_author_off(no_co_author: bool, prefs: &Prefs) -> bool {
+    no_co_author || !prefs.default_co_author
+}
+
+/// Resolve the variant alias for a generic target (remembering / prompting).
+/// Returns `None` for specific aliases or templates with no variants (use the
+/// target as-is).
+fn resolve_variant_alias(
+    template_type: &TemplateType,
+    target: &str,
+    variant_flag: Option<&str>,
+    prefs: &mut Prefs,
+    non_interactive: bool,
+) -> Result<Option<String>> {
+    let options = variant_options(template_type);
+    if options.is_empty() || !is_generic_target(target) {
+        return Ok(None);
+    }
+
+    // Explicit --variant alias
+    if let Some(v) = variant_flag.map(str::trim).filter(|v| !v.is_empty()) {
+        prefs.set_variant(template_type, Some(v.to_string()));
+        return Ok(Some(v.to_string()));
+    }
+
+    // Remembered variant alias
+    if let Some(v) = prefs
+        .template_pref(template_type)
+        .and_then(|p| p.variant.clone())
+    {
+        return Ok(Some(v));
+    }
+
+    // Prompt (only on the fast/non-interactive-skipped path)
+    if non_interactive {
+        let hint = options
+            .iter()
+            .map(|(a, _)| *a)
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(anyhow!(
+            "Non-interactive mode requires a variant for '{}'. Use one of: {} (or --variant)",
+            target,
+            hint
+        ));
+    }
+
+    let labels: Vec<String> = options
+        .iter()
+        .map(|(alias, label)| format!("{}  ({})", label, alias))
+        .collect();
+    let choice = inquire::Select::new(&format!("Select {} variant:", template_type), labels.clone())
+        .with_help_message("↑/↓ navigate, Enter select, Esc cancel")
+        .prompt()
+        .map_err(|e| anyhow!("Variant selection failed: {}", e))?;
+    let idx = labels.iter().position(|l| l == &choice).unwrap();
+    let alias = options[idx].0.to_string();
+    prefs.set_variant(template_type, Some(alias.clone()));
+    Ok(Some(alias))
+}
+
+/// Detect which known provider is currently active in settings.json.
+fn detect_current_provider() -> Option<TemplateType> {
+    let settings_path = get_settings_path(None);
+    let settings = ClaudeSettings::from_file(&settings_path).ok()?;
+    let base_url = settings
+        .env
+        .as_ref()
+        .and_then(|e| e.get("ANTHROPIC_BASE_URL"))
+        .cloned();
+    get_all_templates().into_iter().find(|tt| {
+        get_template_instance(tt)
+            .api_host()
+            .is_some_and(|host| base_url.as_deref().is_some_and(|u| u.contains(host)))
+    })
+}
+
+fn detect_current_provider_label() -> String {
+    detect_current_provider()
+        .map(|t| t.to_string())
+        .unwrap_or_else(|| "none".to_string())
+}
+
+/// Print a concise summary of what is being applied.
+fn print_apply_summary(template_type: &TemplateType, settings: &ClaudeSettings, key: &str) {
+    println!();
+    println!("{} applying '{}'", style("•").cyan(), template_type);
+    if let Some(m) = &settings.model {
+        println!("  model:  {}", m);
+    }
+    println!("  key:    {}", mask_api_key(key));
+    if let Some(e) = &settings.effort_level {
+        println!("  effort: {}", e);
+    }
+    if let Some(base) = settings
+        .env
+        .as_ref()
+        .and_then(|e| e.get("ANTHROPIC_BASE_URL"))
+    {
+        println!("  base:   {}", base);
+    }
+}
+
 /// Apply a template
+#[allow(clippy::too_many_arguments)]
 fn apply_template_command(
     template_type: &TemplateType,
     target: &str,
@@ -406,106 +434,143 @@ fn apply_template_command(
     effort: &Option<String>,
     api_key: &Option<String>,
     no_co_author: bool,
+    switch_key: bool,
+    dry_run: bool,
+    variant: &Option<String>,
 ) -> Result<()> {
-    // Resolve template instance
-    let template_instance = if cli {
-        resolve_template_cli(template_type, target)?
+    let non_interactive = cli || !atty::is(atty::Stream::Stdin);
+    // Interactive TUI when on a TTY, not forced via flags, and not --yes.
+    let use_tui = !non_interactive && !yes;
+    let mut prefs = Prefs::load_or_default();
+
+    // Gather intent: (variant alias, key, effort, scope, co-author-off).
+    let (variant_alias, key_choice, effort, scope, co_author_off) = if use_tui {
+        let display = get_template_instance(template_type)
+            .display_name()
+            .to_string();
+        let current_label = detect_current_provider_label();
+        match crate::tui::run_apply_tui(
+            template_type.clone(),
+            target.to_string(),
+            display,
+            current_label,
+            &prefs,
+        )? {
+            Some(sel) => (
+                sel.variant,
+                sel.key,
+                sel.effort,
+                sel.scope,
+                sel.co_author_off,
+            ),
+            None => {
+                println!("Cancelled.");
+                return Ok(());
+            }
+        }
     } else {
-        resolve_template_interactive(template_type, target)?
+        // Fast / scripted path.
+        if !Prefs::exists() && !non_interactive {
+            onboard_prefs(&mut prefs)?;
+        }
+        let va = resolve_variant_alias(
+            template_type,
+            target,
+            variant.as_deref(),
+            &mut prefs,
+            non_interactive,
+        )?;
+        let remembered_key: Option<KeyRef> = prefs
+            .template_pref(template_type)
+            .and_then(|p| p.last_key.clone());
+        let kc = resolve_api_key(
+            template_type,
+            api_key.as_deref(),
+            remembered_key.as_ref(),
+            switch_key,
+            non_interactive,
+        )?
+        .ok_or_else(|| anyhow!("Cancelled"))?;
+        prefs.set_last_key(template_type, kc.source.clone());
+        let eff = resolve_effort(effort.as_deref(), &prefs, non_interactive);
+        let cao = resolve_co_author_off(no_co_author, &prefs);
+        (va, kc, eff, scope.clone(), cao)
     };
 
-    // Get API key
-    let api_key = if cli {
-        get_api_key_cli(template_type.clone(), api_key.as_deref())?
-    } else {
-        get_api_key_interactively(template_type.clone(), api_key.as_deref())?
-    };
-
-    let mut settings = template_instance.create_settings(&api_key, scope);
-
-    // Inject common environment variables
+    // Build template settings from the resolved alias + key + scope.
+    let template_instance = get_template_instance_with_input(
+        template_type,
+        variant_alias.as_deref().unwrap_or(target),
+    );
+    let mut settings = template_instance.create_settings(&key_choice.key, &scope);
     inject_common_env_vars(&mut settings);
 
-    // Add Windows-specific CLAUDE_CODE_GIT_BASH_PATH
-    if let Some(git_bash_path) = get_git_bash_path(&settings, cli)? {
+    // Windows: CLAUDE_CODE_GIT_BASH_PATH — always auto-detect (never prompt;
+    // interactive selection now happens in the TUI / flags, not here).
+    if let Some(git_bash_path) = get_git_bash_path(&settings, true)? {
         settings
             .env
             .get_or_insert_with(HashMap::new)
             .insert("CLAUDE_CODE_GIT_BASH_PATH".to_string(), git_bash_path);
     }
 
-    // Override model if specified
+    // --model override
     if let Some(model_name) = model {
         settings.model = Some(model_name.clone());
     }
 
-    // Load existing settings for effort prompt and diff comparison
-    let existing_settings = ClaudeSettings::from_file(settings_path)?;
+    // effort + co-author from the resolved selection
+    settings.effort_level = effort.clone();
+    settings.attribution = if co_author_off {
+        Some(Attribution {
+            commit: Some(String::new()),
+            pr: Some(String::new()),
+        })
+    } else {
+        None
+    };
 
-    // Set effort level
-    settings.effort_level = prompt_effort_setting(
-        settings.effort_level.clone(),
-        existing_settings.effort_level.clone(),
-        effort.as_deref(),
-        cli,
-    )?;
+    // Merge by scope (preserves unrelated keys/fields).
+    let existing = ClaudeSettings::from_file(settings_path)?;
+    let merged = ClaudeSettings::merge_by_scope(existing, settings, &scope);
 
-    // Set attribution
-    settings.attribution = prompt_attribution_setting(
-        settings.attribution,
-        existing_settings.attribution.clone(),
-        no_co_author,
-        cli,
-    )?;
-
-    // Backup current settings if requested
     if backup {
         backup_settings(settings_path)?;
     }
 
-    // Confirm overwrite
-    if !yes {
-        let existing_masked = existing_settings.clone().mask_sensitive_data();
-        let new_masked = settings.clone().mask_sensitive_data();
+    print_apply_summary(template_type, &merged, &key_choice.key);
 
-        let comparison = format_settings_comparison(&existing_masked, &new_masked);
-
-        if comparison == "Settings are identical." {
-            println!(
-                "{}",
-                style("Settings are already configured as requested.").green()
-            );
-            // Even if settings are identical, we still need to save them in case the user
-            // explicitly wanted to ensure these settings are applied (replace mode)
-            settings.to_file(settings_path)?;
-            return Ok(());
-        }
-
-        println!("Changes to be applied:");
-        println!("{}", comparison);
-
-        let options = vec!["Apply", "Cancel"];
-        let selection = inquire::Select::new("Confirm:", options)
-            .prompt()
-            .map_err(|_| anyhow::anyhow!("Cancelled"))?;
-        if selection == "Cancel" {
-            return Ok(());
-        }
+    if dry_run {
+        println!(
+            "{} (dry-run — no changes written)",
+            style("•").yellow()
+        );
+        prefs.save()?;
+        return Ok(());
     }
 
-    // Save settings (replace mode - no merging)
-    settings.to_file(settings_path)?;
+    merged.to_file(settings_path)?;
+    // Remember this apply for next time.
+    prefs.record_apply(
+        template_type,
+        variant_alias.clone(),
+        key_choice.source.clone(),
+        scope.clone(),
+        effort.clone(),
+        !co_author_off,
+    );
+    prefs.save()?;
 
     println!(
-        "{} Applied template '{}' successfully!",
+        "{} Applied '{}' — wrote {}",
         style("✓").green().bold(),
-        template_type
+        template_type,
+        settings_path.display()
     );
-
     Ok(())
 }
 
-/// Apply a snapshot
+/// Apply a snapshot (replace-within-scope; snapshots are deliberate restore points)
 fn apply_snapshot_command(
     snapshot_name: &str,
     scope: &SnapshotScope,
@@ -519,42 +584,42 @@ fn apply_snapshot_command(
 
     let mut snapshot = store.load_by_name(snapshot_name)?;
 
-    // Filter settings by scope
     snapshot.settings = snapshot.settings.filter_by_scope(scope);
 
-    // Override model if specified
     if let Some(model_name) = model {
         snapshot.settings.model = Some(model_name.clone());
     }
 
-    // Load existing settings for comparison (will be replaced, not merged)
     let existing_settings = ClaudeSettings::from_file(settings_path)?;
 
-    // Backup current settings if requested
     if backup {
         backup_settings(settings_path)?;
     }
 
-    // Confirm overwrite
     if !yes {
         let existing_masked = existing_settings.clone().mask_sensitive_data();
         let snapshot_masked = snapshot.settings.clone().mask_sensitive_data();
 
         println!("Current settings:");
-        println!("{}", format_settings_for_display(&existing_masked, false));
+        println!(
+            "{}",
+            crate::settings::format_settings_for_display(&existing_masked, false)
+        );
         println!("\nSnapshot settings:");
-        println!("{}", format_settings_for_display(&snapshot_masked, false));
+        println!(
+            "{}",
+            crate::settings::format_settings_for_display(&snapshot_masked, false)
+        );
 
         let options = vec!["Apply", "Cancel"];
         let selection = inquire::Select::new("Confirm:", options)
             .prompt()
-            .map_err(|_| anyhow::anyhow!("Cancelled"))?;
+            .map_err(|_| anyhow!("Cancelled"))?;
         if selection == "Cancel" {
             return Ok(());
         }
     }
 
-    // Save settings (replace mode - no merging)
     snapshot.settings.to_file(settings_path)?;
 
     println!(
@@ -566,6 +631,8 @@ fn apply_snapshot_command(
     Ok(())
 }
 
+// ── credentials ──────────────────────────────────────────────────────────────
+
 /// List saved credentials interactively
 pub fn credentials_list_command() -> Result<()> {
     println!("🔐 Credential Browser");
@@ -573,13 +640,9 @@ pub fn credentials_list_command() -> Result<()> {
 
     let mut selector = crate::selectors::credential::CredentialSelector::new_all()?;
 
-    // Run the interactive selector
     match selector.run_management() {
-        Ok(()) => {
-            println!("\n👋 Goodbye!");
-        }
+        Ok(()) => println!("\n👋 Goodbye!"),
         Err(e) => {
-            // Check if this is a selector cancellation error
             let error_str = e.to_string();
             if error_str.contains("User cancelled selection") {
                 println!("\n👋 Cancelled. See you next time!");
@@ -604,6 +667,150 @@ pub fn credentials_clear_command(yes: bool) -> Result<()> {
     credential_store.clear_credentials()?;
 
     println!("{} Cleared all credentials!", style("✓").green().bold());
+
+    Ok(())
+}
+
+// ── config ───────────────────────────────────────────────────────────────────
+
+/// View / edit persistent preferences.
+pub fn config_command(cfg: &cli::ConfigArgs) -> Result<()> {
+    let mut prefs = Prefs::load_or_default();
+
+    if cfg.reset {
+        prefs = Prefs::default();
+        prefs.save()?;
+        println!("{} Reset all preferences to defaults.", style("✓").green().bold());
+        return Ok(());
+    }
+
+    let mut changed = false;
+    if let Some(e) = cfg.effort.as_deref() {
+        prefs.default_effort = Some(e.to_string());
+        changed = true;
+    }
+    if let Some(co) = cfg.co_author {
+        prefs.default_co_author = co;
+        changed = true;
+    }
+    if let Some(scope) = cfg.scope.as_ref() {
+        prefs.default_scope = scope.clone();
+        changed = true;
+    }
+
+    if !changed && atty::is(atty::Stream::Stdin) {
+        // No flags + interactive terminal → edit defaults via a menu.
+        config_interactive(&mut prefs)?;
+    }
+
+    prefs.save()?;
+    print_config(&prefs);
+    Ok(())
+}
+
+fn config_interactive(prefs: &mut Prefs) -> Result<()> {
+    let options = vec![
+        "Edit default effort",
+        "Edit co-author",
+        "Edit default scope",
+        "Done",
+    ];
+    loop {
+        let choice = match inquire::Select::new("Preferences:", options.clone())
+            .with_help_message("↑/↓ navigate, Enter select, Esc done")
+            .prompt()
+        {
+            Ok(c) => c,
+            Err(_) => break,
+        };
+        match choice {
+            "Edit default effort" => {
+                let efforts = vec!["max", "xhigh", "high", "medium", "low"];
+                if let Ok(e) = inquire::Select::new("Default effort:", efforts).prompt() {
+                    prefs.default_effort = Some(e.to_string());
+                    prefs.save()?;
+                    println!("{} default effort = {}", style("✓").green(), e);
+                }
+            }
+            "Edit co-author" => {
+                let co = inquire::Confirm::new("Enable co-authored-by?")
+                    .with_default(prefs.default_co_author)
+                    .prompt()
+                    .unwrap_or(prefs.default_co_author);
+                prefs.default_co_author = co;
+                prefs.save()?;
+                println!("{} co-author = {}", style("✓").green(), co);
+            }
+            "Edit default scope" => {
+                let scopes = vec!["common", "env", "all"];
+                if let Ok(s) = inquire::Select::new("Default scope:", scopes).prompt()
+                    && let Ok(scope) = s.parse::<SnapshotScope>() {
+                        prefs.default_scope = scope;
+                        prefs.save()?;
+                        println!("{} default scope = {}", style("✓").green(), s);
+                    }
+            }
+            _ => break,
+        }
+    }
+    Ok(())
+}
+
+fn print_config(prefs: &Prefs) {
+    println!();
+    println!("{} Preferences ({})", style("•").cyan(), Prefs::path().display());
+    println!(
+        "  default effort:   {}",
+        prefs.default_effort.as_deref().unwrap_or("(unset)")
+    );
+    println!(
+        "  co-author:        {}",
+        if prefs.default_co_author {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
+    println!("  default scope:    {}", prefs.default_scope);
+    println!("  remembered templates: {}", prefs.templates.len());
+}
+
+// ── current ──────────────────────────────────────────────────────────────────
+
+/// Show the currently-active provider detected from settings.json.
+pub fn current_command() -> Result<()> {
+    let settings_path = get_settings_path(None);
+    let settings = ClaudeSettings::from_file(&settings_path)?;
+
+    println!("📍 {}", settings_path.display());
+
+    let base_url = settings
+        .env
+        .as_ref()
+        .and_then(|e| e.get("ANTHROPIC_BASE_URL"))
+        .cloned();
+
+    match detect_current_provider() {
+        Some(tt) => println!("Provider: {}", tt),
+        None => println!("Provider: {}", style("(unknown / custom)").yellow()),
+    }
+
+    if let Some(m) = &settings.model {
+        println!("Model:    {}", m);
+    }
+    if let Some(env) = &settings.env
+        && let Some(k) = env
+            .get("ANTHROPIC_AUTH_TOKEN")
+            .or_else(|| env.get("ANTHROPIC_API_KEY"))
+        {
+            println!("Key:      {}", mask_api_key(k));
+        }
+    if let Some(e) = &settings.effort_level {
+        println!("Effort:   {}", e);
+    }
+    if let Some(base) = &base_url {
+        println!("Base URL: {}", base);
+    }
 
     Ok(())
 }

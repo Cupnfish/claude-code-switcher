@@ -10,10 +10,12 @@ use crate::cli::Cli;
 pub mod cli;
 pub mod commands;
 pub mod credentials;
+pub mod prefs;
 pub mod selectors;
 pub mod settings;
 pub mod snapshots;
 pub mod templates;
+pub mod tui;
 pub mod utils;
 
 // Core traits for abstraction

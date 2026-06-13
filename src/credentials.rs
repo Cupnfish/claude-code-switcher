@@ -11,11 +11,14 @@ use anyhow::{Result, anyhow};
 use chrono::Utc;
 use inquire::{Confirm, Select, Text};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use uuid::Uuid;
 
+use crate::prefs::KeyRef;
 use crate::templates::TemplateType;
+use crate::CredentialManager;
 
 /// Current credential data format version
 pub const CURRENT_CREDENTIAL_VERSION: &str = "v2";
@@ -485,127 +488,307 @@ impl crate::CredentialManager for CredentialStore {
     }
 }
 
-/// Helper function to select a credential from a list
-pub fn select_credential<'a>(
-    credentials: &'a [SavedCredential],
-    message: &str,
-) -> Result<&'a SavedCredential> {
-    let options: Vec<String> = credentials
-        .iter()
-        .map(|c| {
-            format!(
-                "{} ({} - {})",
-                c.name(),
-                c.template_type(),
-                mask_api_key(c.api_key())
-            )
-        })
-        .collect();
+// ── API key acquisition for `apply` ──────────────────────────────────────────
 
-    let selected = Select::new(message, options.clone())
-        .prompt()
-        .map_err(|e| anyhow!("Failed to select credential: {}", e))?;
-
-    let index = options.iter().position(|o| o == &selected).unwrap();
-    Ok(&credentials[index])
+/// A resolved API key plus a reference to its source (so the caller can
+/// remember it across runs).
+#[derive(Debug, Clone)]
+pub struct ApiKeyChoice {
+    /// The API key to use.
+    pub key: String,
+    /// Where the key came from, for remembering in prefs (or `None` for a
+    /// one-off `--api-key` / unsaved entry).
+    pub source: Option<KeyRef>,
 }
 
-/// Prompt user to save a credential interactively
-pub fn prompt_save_credential(
-    api_key: &str,
-    template_type: TemplateType,
-) -> Result<Option<SavedCredential>> {
-    if let Ok(should_save) = Confirm::new("Would you like to save this API key for future use?")
-        .with_default(true)
-        .prompt()
-        && should_save
-    {
-        let name = Text::new("Enter a name for this credential:")
-            .with_placeholder(&format!("{} API Key", template_type))
-            .prompt()
-            .map_err(|e| anyhow!("Failed to get credential name: {}", e))?;
-
-        let store = CredentialStore::new()?;
-        let credential = store.create_credential(name, api_key, template_type)?;
-
-        println!("✓ Credential saved successfully!");
-        return Ok(Some(credential));
-    }
-    Ok(None)
+/// A selectable API key source (env var or saved credential).
+#[derive(Debug, Clone)]
+pub enum ApiKeySource {
+    /// API key read from an environment variable.
+    EnvVar { env_var_name: String, api_key: String },
+    /// API key from a saved credential.
+    Saved { credential: SavedCredential },
 }
 
-/// Get API key in non-interactive (CLI) mode
-/// Uses --api-key parameter or first available env var
-pub fn get_api_key_cli(template_type: TemplateType, api_key_param: Option<&str>) -> Result<String> {
-    // Use provided API key if available
-    if let Some(key) = api_key_param
-        && !key.trim().is_empty() {
-            return Ok(key.to_string());
+impl ApiKeySource {
+    pub fn api_key(&self) -> &str {
+        match self {
+            ApiKeySource::EnvVar { api_key, .. } => api_key,
+            ApiKeySource::Saved { credential } => credential.api_key(),
         }
+    }
 
-    // Try environment variables
-    let env_var_names = crate::templates::get_env_var_names(&template_type);
+    pub fn to_key_ref(&self) -> KeyRef {
+        match self {
+            ApiKeySource::EnvVar { env_var_name, .. } => KeyRef::EnvVar(env_var_name.clone()),
+            ApiKeySource::Saved { credential } => KeyRef::Credential(credential.id().to_string()),
+        }
+    }
+
+    pub fn display(&self) -> String {
+        match self {
+            ApiKeySource::EnvVar {
+                env_var_name,
+                api_key,
+            } => format!("🌐 {} = {}", env_var_name, mask_api_key(api_key)),
+            ApiKeySource::Saved { credential } => format!(
+                "🔑 {} ({}) - {}",
+                credential.name(),
+                credential.template_type(),
+                mask_api_key(credential.api_key())
+            ),
+        }
+    }
+}
+
+/// Collect unified API key sources (env vars + saved credentials) for a
+/// template, sorted by last usage and de-duplicated. Env var keys win.
+pub fn collect_api_key_sources(template_type: &TemplateType) -> Result<Vec<ApiKeySource>> {
+    let mut sources: Vec<ApiKeySource> = Vec::new();
+
+    // 1. environment variables
+    let env_var_names = crate::templates::get_env_var_names(template_type);
     for env_var_name in &env_var_names {
         if let Some(api_key) = std::env::var(env_var_name)
             .ok()
             .filter(|key| !key.trim().is_empty())
         {
-            println!("✓ Using API key from environment variable {}", env_var_name);
-            return Ok(api_key);
+            sources.push(ApiKeySource::EnvVar {
+                env_var_name: env_var_name.to_string(),
+                api_key,
+            });
         }
     }
 
-    Err(anyhow!(
-        "No API key available in CLI mode. Set one of: {} or use --api-key",
-        env_var_names.join(", ")
-    ))
-}
-
-/// Get API key interactively using simple selector
-/// If api_key_param is provided, skip all prompts and use it directly
-pub fn get_api_key_interactively(
-    template_type: TemplateType,
-    api_key_param: Option<&str>,
-) -> Result<String> {
-    // Use provided API key if available
-    if let Some(key) = api_key_param
-        && !key.trim().is_empty() {
-            return Ok(key.to_string());
+    // 2. saved credentials for this template type
+    if let Ok(store) = CredentialStore::new()
+        && let Ok(all) = store.load_credentials()
+    {
+        for credential in all.into_iter().filter(|c| c.template_type() == template_type) {
+            sources.push(ApiKeySource::Saved { credential });
         }
+    }
 
-    get_api_key_interactive_inner(template_type)
-}
+    // 3. sort: used creds (last_used desc) → env vars → unused creds (created desc)
+    sources.sort_by(|a, b| {
+        let priority = |s: &ApiKeySource| match s {
+            ApiKeySource::Saved { credential } => match credential.last_used_at() {
+                Some(ts) => (2u8, ts.to_string()),
+                None => (0u8, credential.created_at().to_string()),
+            },
+            ApiKeySource::EnvVar { .. } => (1u8, String::new()),
+        };
+        priority(b).cmp(&priority(a))
+    });
 
-/// Inner interactive API key selection logic
-fn get_api_key_interactive_inner(template_type: TemplateType) -> Result<String> {
-    // Use unified selector that combines env vars, saved credentials, and create
-    let template_type_clone = template_type.clone();
-    match crate::selectors::credential::CredentialSelector::select_api_key_unified(template_type)? {
-        Some(api_key) => {
-            // Auto-save the credential if it's new
-            if let Ok(credential_store) = CredentialStore::new()
-                && !credential_store.has_api_key(&api_key, &template_type_clone)
-            {
-                let masked = mask_api_key(&api_key);
-                let default_name = format!("{} API Key", template_type_clone);
-                let name = inquire::Text::new("Save as (alias):")
-                    .with_default(&default_name)
-                    .with_help_message(
-                        format!("Enter an alias for {} to identify it later", masked).as_str(),
-                    )
-                    .prompt()
-                    .unwrap_or(default_name);
-                let name = name.trim().to_string();
-                if credential_store
-                    .create_credential(name, &api_key, template_type_clone)
-                    .is_ok()
-                {
-                    println!("✓ API key saved automatically for future use.");
+    // 4. dedup: env var keys win; also dedup saved credentials by api_key
+    let env_keys: HashSet<String> = sources
+        .iter()
+        .filter_map(|s| match s {
+            ApiKeySource::EnvVar { api_key, .. } => Some(api_key.clone()),
+            _ => None,
+        })
+        .collect();
+
+    let mut seen = env_keys;
+    let mut deduped = Vec::new();
+    for source in sources {
+        match &source {
+            ApiKeySource::EnvVar { .. } => deduped.push(source),
+            ApiKeySource::Saved { credential } => {
+                if seen.insert(credential.api_key().to_string()) {
+                    deduped.push(source);
                 }
             }
-            Ok(api_key)
         }
-        None => Err(anyhow!("No API key selected")),
+    }
+
+    Ok(deduped)
+}
+
+/// Find a source matching a remembered [`KeyRef`].
+fn find_source_by_ref<'a>(
+    sources: &'a [ApiKeySource],
+    key_ref: &KeyRef,
+) -> Option<&'a ApiKeySource> {
+    sources.iter().find(|s| match (s, key_ref) {
+        (ApiKeySource::EnvVar { env_var_name, .. }, KeyRef::EnvVar(name)) => {
+            env_var_name == name
+        }
+        (ApiKeySource::Saved { credential }, KeyRef::Credential(id)) => credential.id() == id,
+        _ => false,
+    })
+}
+
+/// Prompt the user to pick an API key source (or enter a new one).
+fn prompt_api_key_choice(
+    template_type: &TemplateType,
+    sources: &[ApiKeySource],
+) -> Result<Option<ApiKeyChoice>> {
+    let mut options: Vec<String> = sources.iter().map(|s| s.display()).collect();
+    options.push("➕ Enter a new API key...".to_string());
+
+    let title = format!("Select {} API key:", template_type);
+    let selection = match Select::new(&title, options.clone())
+        .with_help_message("↑/↓ navigate, type to filter, Enter select, Esc cancel")
+        .prompt()
+    {
+        Ok(s) => s,
+        Err(inquire::InquireError::OperationCanceled)
+        | Err(inquire::InquireError::OperationInterrupted) => return Ok(None),
+        Err(e) => return Err(anyhow!("Selection failed: {}", e)),
+    };
+
+    if selection == "➕ Enter a new API key..." {
+        return prompt_new_api_key_choice(template_type);
+    }
+
+    let index = options
+        .iter()
+        .position(|o| o == &selection)
+        .ok_or_else(|| anyhow!("Selected source not found"))?;
+    let source = &sources[index];
+
+    if let ApiKeySource::Saved { credential } = source
+        && let Ok(store) = CredentialStore::new()
+    {
+        let _ = store.touch_last_used(credential.id());
+    }
+
+    Ok(Some(ApiKeyChoice {
+        key: source.api_key().to_string(),
+        source: Some(source.to_key_ref()),
+    }))
+}
+
+/// Prompt the user to enter a new API key, optionally saving it.
+fn prompt_new_api_key_choice(template_type: &TemplateType) -> Result<Option<ApiKeyChoice>> {
+    let template_instance = crate::templates::get_template_instance(template_type);
+    println!();
+    println!("🔑 Create new API key");
+    if let Some(url) = template_instance.api_key_url() {
+        println!("  💡 Get your API key from: {}", url);
+    }
+
+    let api_key = match Text::new(&format!("Enter your {} API key:", template_type))
+        .with_placeholder("sk-...")
+        .prompt()
+    {
+        Ok(s) => s.trim().to_string(),
+        Err(inquire::InquireError::OperationCanceled)
+        | Err(inquire::InquireError::OperationInterrupted) => return Ok(None),
+        Err(e) => return Err(anyhow!("Input failed: {}", e)),
+    };
+    if api_key.is_empty() {
+        return Err(anyhow!("API key cannot be empty"));
+    }
+
+    let source = save_credential_if_desired(template_type, &api_key)?;
+    Ok(Some(ApiKeyChoice { key: api_key, source }))
+}
+
+/// Offer to save a freshly-entered key as a credential. Returns its [`KeyRef`]
+/// if saved.
+fn save_credential_if_desired(
+    template_type: &TemplateType,
+    api_key: &str,
+) -> Result<Option<KeyRef>> {
+    if let Ok(store) = CredentialStore::new()
+        && store.has_api_key(api_key, template_type)
+    {
+        return Ok(None); // already stored
+    }
+
+    let should_save = match Confirm::new("Save this API key for future use?")
+        .with_default(true)
+        .prompt()
+    {
+        Ok(v) => v,
+        Err(_) => return Ok(None),
+    };
+    if !should_save {
+        return Ok(None);
+    }
+
+    let default_name = format!("{} API Key", template_type);
+    let name = Text::new("Save as (alias):")
+        .with_default(&default_name)
+        .with_help_message(format!("Alias for {}", mask_api_key(api_key)).as_str())
+        .prompt()
+        .unwrap_or(default_name);
+    let name = name.trim().to_string();
+
+    if let Ok(store) = CredentialStore::new() {
+        let cred = store.create_credential(name, api_key, template_type.clone())?;
+        println!("✓ API key saved.");
+        return Ok(Some(KeyRef::Credential(cred.id().to_string())));
+    }
+    Ok(None)
+}
+
+/// Resolve an API key for applying a template.
+///
+/// Decision order: explicit `api_key_param` → a remembered source that still
+/// exists → a single available source → interactive prompt. Returns the key and
+/// its source so the caller can remember it. `Ok(None)` means the user
+/// cancelled. In `non_interactive` mode this never prompts and errors if no key
+/// is available.
+pub fn resolve_api_key(
+    template_type: &TemplateType,
+    api_key_param: Option<&str>,
+    remembered: Option<&KeyRef>,
+    force_prompt: bool,
+    non_interactive: bool,
+) -> Result<Option<ApiKeyChoice>> {
+    // explicit flag always wins
+    if let Some(key) = api_key_param.map(str::trim).filter(|k| !k.is_empty()) {
+        return Ok(Some(ApiKeyChoice {
+            key: key.to_string(),
+            source: None,
+        }));
+    }
+
+    let sources = collect_api_key_sources(template_type)?;
+
+    if !force_prompt {
+        // remembered source still present?
+        if let Some(kr) = remembered
+            && let Some(src) = find_source_by_ref(&sources, kr)
+        {
+            return Ok(Some(ApiKeyChoice {
+                key: src.api_key().to_string(),
+                source: Some(src.to_key_ref()),
+            }));
+        }
+
+        // exactly one source → use silently
+        if sources.len() == 1 {
+            let src = &sources[0];
+            if let ApiKeySource::Saved { credential } = src
+                && let Ok(store) = CredentialStore::new()
+            {
+                let _ = store.touch_last_used(credential.id());
+            }
+            return Ok(Some(ApiKeyChoice {
+                key: src.api_key().to_string(),
+                source: Some(src.to_key_ref()),
+            }));
+        }
+    }
+
+    // otherwise we need a prompt
+    if non_interactive {
+        let env_var_names = crate::templates::get_env_var_names(template_type);
+        return Err(anyhow!(
+            "No API key available in non-interactive mode. Set one of: {} or use --api-key",
+            env_var_names.join(", ")
+        ));
+    }
+
+    if sources.is_empty() {
+        prompt_new_api_key_choice(template_type)
+    } else {
+        prompt_api_key_choice(template_type, &sources)
     }
 }
 

@@ -1,18 +1,14 @@
-//! Unified selector framework
+//! Interactive selection helpers (inquire-based).
 //!
-//! Provides a consistent interface for interactive selection across different
-//! types of items (credentials, snapshots, templates, etc.).
+//! The old custom crossterm full-screen Selector was removed in favor of a
+//! single, consistent prompt style via `inquire`.
 
-pub mod base;
 pub mod confirmation;
-pub mod error;
-
-// Concrete selector implementations
 pub mod credential;
+pub mod error;
 pub mod snapshot;
 pub mod template;
 
 // Re-export commonly used types
-pub use base::{SelectableItem, SelectionResult, Selector};
 pub use confirmation::ConfirmationService;
 pub use error::{SelectorError, SelectorResult};

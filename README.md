@@ -128,7 +128,36 @@ ccs apply openrouter
 # 别名：or
 ```
 
-> **首次使用**：工具会提示输入 API 密钥，可选择保存到本地以便后续自动使用。
+> **零打扰切换**：`ccs` 会记住你的偏好（变体、上次的 API key、默认 effort、是否署名），
+> 保存到 `~/.claude/ccs-prefs.json`。首次运行会一次性询问默认 effort 与署名设置；之后
+> `ccs apply zai` 直接应用，只打印一行摘要，**不再逐项询问**。
+> 切换提供商时采用**按 scope 合并**：模板只替换它负责的字段（env/model/permissions 等），
+> 你其余的设置（hooks、自定义权限、MCP 等）会被保留，不会丢失。
+
+#### `apply` 常用选项
+
+```bash
+ccs apply zai                  # 零打扰应用（使用记住的 key/变体/偏好）
+ccs apply zai --dry-run        # 预览将写入的设置，不实际写入
+ccs apply zai --switch-key      # 强制弹出 API key 选择，忽略记住的 key
+ccs apply zai-china             # 指定变体（也可用 --variant zai-china）
+ccs apply zai --effort max      # 本次覆盖默认 effort
+ccs apply zai --api-key sk-...  # 直接指定 key，跳过选择（别名 --key）
+ccs apply zai --scope env       # 只切换 env 变量
+ccs apply zai --backup          # 应用前备份当前设置
+```
+
+#### 其它命令
+
+```bash
+ccs current                     # 显示当前生效的提供商/模型/key/effort（别名 status）
+ccs config                      # 查看/编辑偏好（effort、署名、scope）
+ccs config --effort max         # 直接设置默认 effort
+ccs config --co-author false    # 关闭署名（--co-author 则开启）
+ccs ls                          # 快照浏览器（创建/应用/删除）
+ccs credentials list            # 凭据浏览器（重命名/删除）
+```
+
 
 ---
 

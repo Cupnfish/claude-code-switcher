@@ -352,13 +352,14 @@ pub fn resolve_template_interactive(
 }
 
 /// Check if target is a generic name (no specific variant specified)
-fn is_generic_target(target: &str) -> bool {
+pub fn is_generic_target(target: &str) -> bool {
     matches!(
         target.to_lowercase().as_str(),
         "kat-coder"
             | "katcoder"
             | "kat"
             | "kimi"
+            | "minimax"
             | "zai"
             | "glm"
             | "zhipu"
@@ -368,6 +369,35 @@ fn is_generic_target(target: &str) -> bool {
             | "openrouter"
             | "or"
     )
+}
+
+/// Concrete variant aliases for a template that offers region/variant choice.
+/// Each tuple is `(canonical_input_alias, display_label)`. The alias is
+/// reconstructable via [`get_template_instance_with_input`] and storable in
+/// prefs. Empty for templates with no interactive variants.
+pub fn variant_options(template_type: &TemplateType) -> Vec<(&'static str, &'static str)> {
+    match template_type {
+        TemplateType::Zai => vec![
+            ("zai-china", "ZAI China (智谱AI)"),
+            ("zai-international", "ZAI International"),
+        ],
+        TemplateType::KatCoder => vec![
+            ("kat-coder-pro", "KatCoder Pro"),
+            ("kat-coder-air", "KatCoder Air"),
+        ],
+        TemplateType::Kimi => vec![
+            ("k2", "K2"),
+            ("k2-thinking", "K2 Thinking"),
+            ("kimi", "Kimi For Coding"),
+        ],
+        TemplateType::MiniMax => vec![
+            ("minimax", "MiniMax China"),
+            ("minimax-international", "MiniMax International"),
+        ],
+        // OpenRouter is model-based (handled by create_with_model_selection);
+        // Day77 and the rest have no interactive variants.
+        _ => vec![],
+    }
 }
 
 /// Legacy compatibility function - creates a settings function for backwards compatibility

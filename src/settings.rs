@@ -361,6 +361,76 @@ impl ClaudeSettings {
 
         None
     }
+
+    /// Merge `template` settings into `existing`, bounded by `scope`.
+    ///
+    /// The template wins for the fields its scope owns; `existing` fills the
+    /// rest. `env` is always a **key-level union** (template keys override,
+    /// existing keys the template doesn't set are preserved), so switching
+    /// providers never silently drops the user's unrelated env vars.
+    ///
+    /// This is deliberately separate from `Configurable::merge_with`, whose
+    /// scalar-field priority is inconsistent with its env priority
+    /// (`settings.rs` `merge_with`).
+    pub fn merge_by_scope(
+        existing: Self,
+        template: Self,
+        scope: &SnapshotScope,
+    ) -> Self {
+        let mut merged = existing;
+
+        // env is always a key-level union (template overrides per key)
+        merged.env = merge_hashmaps(template.env.clone(), merged.env);
+
+        // In-scope scalar/struct fields: template value replaces when set.
+        match scope {
+            SnapshotScope::Env => {
+                // env handled above; nothing else owned
+            }
+            SnapshotScope::Common => {
+                merged.model = template.model.or(merged.model);
+                merged.output_style = template.output_style.or(merged.output_style);
+                merged.attribution = template.attribution.or(merged.attribution);
+                merged.permissions = template.permissions.or(merged.permissions);
+                merged.hooks = template.hooks.or(merged.hooks);
+                merged.status_line = template.status_line.or(merged.status_line);
+                merged.subagent_model = template.subagent_model.or(merged.subagent_model);
+                merged.effort_level = template.effort_level.or(merged.effort_level);
+            }
+            SnapshotScope::All => {
+                // template owns every field
+                merged.model = template.model.or(merged.model);
+                merged.output_style = template.output_style.or(merged.output_style);
+                merged.attribution = template.attribution.or(merged.attribution);
+                merged.permissions = template.permissions.or(merged.permissions);
+                merged.hooks = template.hooks.or(merged.hooks);
+                merged.status_line = template.status_line.or(merged.status_line);
+                merged.subagent_model = template.subagent_model.or(merged.subagent_model);
+                merged.effort_level = template.effort_level.or(merged.effort_level);
+                merged.api_key_helper = template.api_key_helper.or(merged.api_key_helper);
+                merged.cleanup_period_days =
+                    template.cleanup_period_days.or(merged.cleanup_period_days);
+                merged.disable_all_hooks = template.disable_all_hooks.or(merged.disable_all_hooks);
+                merged.force_login_method = template.force_login_method.or(merged.force_login_method);
+                merged.force_login_org_uuid =
+                    template.force_login_org_uuid.or(merged.force_login_org_uuid);
+                merged.enable_all_project_mcp_servers = template
+                    .enable_all_project_mcp_servers
+                    .or(merged.enable_all_project_mcp_servers);
+                merged.enabled_mcpjson_servers = template
+                    .enabled_mcpjson_servers
+                    .or(merged.enabled_mcpjson_servers);
+                merged.disabled_mcpjson_servers = template
+                    .disabled_mcpjson_servers
+                    .or(merged.disabled_mcpjson_servers);
+                merged.aws_auth_refresh = template.aws_auth_refresh.or(merged.aws_auth_refresh);
+                merged.aws_credential_export =
+                    template.aws_credential_export.or(merged.aws_credential_export);
+            }
+        }
+
+        merged
+    }
 }
 
 impl crate::Configurable for ClaudeSettings {
@@ -721,5 +791,105 @@ mod tests {
             serde_json::from_str(json_no_env).expect("Should deserialize successfully");
 
         assert_eq!(settings.env, None);
+    }
+
+    #[test]
+    fn test_merge_by_scope_env_unions_and_preserves_unrelated() {
+        use crate::snapshots::SnapshotScope;
+
+        let mut existing_env = HashMap::new();
+        existing_env.insert("ANTHROPIC_BASE_URL".to_string(), "old".to_string());
+        existing_env.insert("MY_CUSTOM_VAR".to_string(), "keep".to_string());
+        let existing = ClaudeSettings {
+            env: Some(existing_env),
+            ..Default::default()
+        };
+
+        let mut template_env = HashMap::new();
+        template_env.insert("ANTHROPIC_BASE_URL".to_string(), "new".to_string());
+        template_env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), "tok".to_string());
+        let template = ClaudeSettings {
+            env: Some(template_env),
+            ..Default::default()
+        };
+
+        let merged = ClaudeSettings::merge_by_scope(existing, template, &SnapshotScope::Common);
+        let env = merged.env.expect("merged env should exist");
+        // template overrides conflicting key
+        assert_eq!(env.get("ANTHROPIC_BASE_URL"), Some(&"new".to_string()));
+        // template adds its own keys
+        assert_eq!(env.get("ANTHROPIC_AUTH_TOKEN"), Some(&"tok".to_string()));
+        // existing unrelated key preserved (the data-loss fix)
+        assert_eq!(env.get("MY_CUSTOM_VAR"), Some(&"keep".to_string()));
+    }
+
+    #[test]
+    fn test_merge_by_scope_common_preserves_out_of_scope_fields() {
+        use crate::snapshots::SnapshotScope;
+
+        let existing = ClaudeSettings {
+            model: Some("old-model".to_string()),
+            enabled_mcpjson_servers: Some(vec!["my-mcp".to_string()]),
+            ..Default::default()
+        };
+        let template = ClaudeSettings {
+            model: Some("new-model".to_string()),
+            ..Default::default()
+        };
+
+        let merged = ClaudeSettings::merge_by_scope(existing, template, &SnapshotScope::Common);
+        assert_eq!(merged.model, Some("new-model".to_string())); // template wins (in scope)
+        // out-of-scope mcp config preserved
+        assert_eq!(
+            merged.enabled_mcpjson_servers,
+            Some(vec!["my-mcp".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_merge_by_scope_env_scope_only_touches_env() {
+        use crate::snapshots::SnapshotScope;
+
+        let existing = ClaudeSettings {
+            model: Some("keep-model".to_string()),
+            permissions: Some(Permissions {
+                allow: Some(vec!["Read".to_string()]),
+                ask: None,
+                deny: None,
+                additional_directories: None,
+                default_mode: None,
+                disable_bypass_permissions_mode: None,
+            }),
+            ..Default::default()
+        };
+        let mut template_env = HashMap::new();
+        template_env.insert("X".to_string(), "1".to_string());
+        let template = ClaudeSettings {
+            env: Some(template_env),
+            model: Some("template-model".to_string()),
+            ..Default::default()
+        };
+
+        let merged = ClaudeSettings::merge_by_scope(existing, template, &SnapshotScope::Env);
+        assert_eq!(merged.env.unwrap().get("X"), Some(&"1".to_string())); // env applied
+        assert_eq!(merged.model, Some("keep-model".to_string())); // model untouched
+        assert!(merged.permissions.is_some()); // permissions untouched
+    }
+
+    #[test]
+    fn test_merge_by_scope_template_none_keeps_existing() {
+        use crate::snapshots::SnapshotScope;
+
+        let existing = ClaudeSettings {
+            model: Some("keep".to_string()),
+            ..Default::default()
+        };
+        let template = ClaudeSettings {
+            model: None,
+            ..Default::default()
+        };
+
+        let merged = ClaudeSettings::merge_by_scope(existing, template, &SnapshotScope::Common);
+        assert_eq!(merged.model, Some("keep".to_string()));
     }
 }

@@ -1,4 +1,4 @@
-//! Template selector for choosing AI provider templates
+//! Template selector helpers (inquire-based).
 
 use crate::selectors::error::{SelectorError, SelectorResult};
 use crate::{
@@ -10,40 +10,6 @@ use crate::{
 pub struct TemplateSelector;
 
 impl TemplateSelector {
-    /// Select a template type from available options
-    pub fn select_template() -> SelectorResult<TemplateType> {
-        let template_types = [
-            TemplateType::DeepSeek,
-            TemplateType::Zai,
-            TemplateType::KatCoder,
-            TemplateType::Kimi,
-            TemplateType::Longcat,
-            TemplateType::Fishtrip,
-            TemplateType::MiniMax,
-            TemplateType::SeedCode,
-            TemplateType::Zenmux,
-            TemplateType::Duojie,
-            TemplateType::AnyRouter,
-        ];
-
-        let options: Vec<String> = template_types.iter().map(|t| t.to_string()).collect();
-
-        let selection = inquire::Select::new("Select AI provider:", options)
-            .with_help_message("↑/↓: Navigate, Enter: Select, Esc: Cancel")
-            .prompt()
-            .map_err(inquire_to_selector_error)?;
-
-        template_types
-            .into_iter()
-            .find(|t| t.to_string() == selection)
-            .ok_or(SelectorError::NotFound)
-    }
-
-    /// Get API key for a template type
-    pub fn get_api_key_for_template(template_type: TemplateType) -> SelectorResult<Option<String>> {
-        crate::selectors::credential::CredentialSelector::select_api_key(template_type)
-    }
-
     /// Get endpoint ID for templates that require it
     pub fn get_endpoint_id_for_template(
         template_type: &TemplateType,
