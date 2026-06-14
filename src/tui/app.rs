@@ -1,20 +1,21 @@
 //! Apply-TUI application state and event handling.
 //!
 //! The TUI gathers the user's intent (which key, effort, scope, co-author,
-//! variant) for a given target and returns an [`ApplySelection`]; it does not
-//! touch settings.json itself.
+//! variant, auto-compact) for a given target and returns an [`ApplySelection`]; it
+//! does not touch settings.json itself.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::CredentialManager;
 use crate::credentials::{
     ApiKeyChoice, ApiKeySource, CredentialStore, collect_api_key_sources, mask_api_key,
 };
 use crate::prefs::{KeyRef, Prefs};
 use crate::snapshots::SnapshotScope;
 use crate::templates::{
-    TemplateType, get_template_instance_with_input, is_generic_target, variant_options,
+    AutoCompactWindow, TemplateType, get_template_instance_with_input, is_generic_target,
+    supports_auto_compact_option, variant_options,
 };
-use crate::CredentialManager;
 
 use super::input::TextInput;
 
@@ -27,6 +28,7 @@ pub struct ApplySelection {
     /// `true` = co-author disabled.
     pub co_author_off: bool,
     pub variant: Option<String>,
+    pub auto_compact_window: Option<AutoCompactWindow>,
 }
 
 /// What an event produced.
@@ -56,6 +58,18 @@ const SCOPES: &[SnapshotScope] = &[
     SnapshotScope::All,
 ];
 
+fn supported_auto_compact_windows_for(
+    template_type: &TemplateType,
+    alias: &str,
+) -> Vec<AutoCompactWindow> {
+    let template = get_template_instance_with_input(template_type, alias);
+    if supports_auto_compact_option(template.as_ref()) {
+        template.supported_auto_compact_windows().to_vec()
+    } else {
+        Vec::new()
+    }
+}
+
 /// Which row the cursor is on.
 #[derive(Clone, Copy)]
 enum Row {
@@ -65,6 +79,7 @@ enum Row {
     Scope,
     CoAuthor,
     Variant,
+    AutoCompact,
     Apply,
 }
 
@@ -84,6 +99,8 @@ pub struct App {
     variant_aliases: Vec<(&'static str, &'static str)>,
     variant_idx: usize,
     has_variant_row: bool,
+    auto_compact_windows: Vec<AutoCompactWindow>,
+    auto_compact_idx: usize,
 
     pub mode: Mode,
 }
@@ -102,7 +119,6 @@ impl App {
 
         let variant_aliases = variant_options(&template_type);
         let has_variant_row = !variant_aliases.is_empty() && is_generic_target(&target);
-
         let tpref = prefs.template_pref(&template_type);
 
         // variant
@@ -114,21 +130,39 @@ impl App {
                 .and_then(|v| variant_aliases.iter().position(|(a, _)| *a == v))
                 .unwrap_or(0)
         };
+        let initial_alias = if has_variant_row {
+            variant_aliases[variant_idx].0
+        } else {
+            target.as_str()
+        };
+        let auto_compact_windows =
+            supported_auto_compact_windows_for(&template_type, initial_alias);
+
+        // auto-compact: last → provider default
+        let auto_compact_idx = if auto_compact_windows.is_empty() {
+            0
+        } else {
+            tpref
+                .and_then(|p| {
+                    p.last_auto_compact_window
+                        .as_deref()
+                        .or(p.last_context_window.as_deref())
+                })
+                .and_then(|value| value.parse::<AutoCompactWindow>().ok())
+                .and_then(|value| auto_compact_windows.iter().position(|x| *x == value))
+                .unwrap_or(0)
+        };
 
         // selected key: remembered & still present, else first
         let selected_key = (|| {
             let kr = tpref.and_then(|p| p.last_key.as_ref())?;
-            sources
-                .iter()
-                .position(|s| match (s, kr) {
-                    (ApiKeySource::EnvVar { env_var_name, .. }, KeyRef::EnvVar(n)) => {
-                        env_var_name == n
-                    }
-                    (ApiKeySource::Saved { credential }, KeyRef::Credential(id)) => {
-                        credential.id() == id
-                    }
-                    _ => false,
-                })
+            sources.iter().position(|s| match (s, kr) {
+                (ApiKeySource::EnvVar { env_var_name, .. }, KeyRef::EnvVar(n)) => env_var_name == n,
+                (ApiKeySource::Saved { credential }, KeyRef::Credential(id)) => {
+                    credential.id() == id
+                }
+                _ => false,
+            })
         })()
         .or(if sources.is_empty() { None } else { Some(0) });
 
@@ -147,7 +181,9 @@ impl App {
             .unwrap_or(0);
 
         // co-author: last → global default (false = off)
-        let co_author = tpref.and_then(|p| p.last_co_author).unwrap_or(prefs.default_co_author);
+        let co_author = tpref
+            .and_then(|p| p.last_co_author)
+            .unwrap_or(prefs.default_co_author);
 
         // initial cursor: on the selected key if any, else NewKey, else Apply
         let cursor = selected_key.unwrap_or({
@@ -169,6 +205,8 @@ impl App {
             variant_aliases,
             variant_idx,
             has_variant_row,
+            auto_compact_windows,
+            auto_compact_idx,
             mode: Mode::Normal,
         })
     }
@@ -180,6 +218,7 @@ impl App {
     }
     fn n_options(&self) -> usize {
         3 + if self.has_variant_row { 1 } else { 0 }
+            + if self.has_auto_compact_row() { 1 } else { 0 }
     }
     fn total_rows(&self) -> usize {
         self.n_keys() + 1 + self.n_options() + 1
@@ -199,21 +238,13 @@ impl App {
         } else {
             // option rows start after NewKey
             let o = cursor - (nk + 1);
-            if self.has_variant_row {
-                match o {
-                    0 => Row::Effort,
-                    1 => Row::Scope,
-                    2 => Row::CoAuthor,
-                    3 => Row::Variant,
-                    _ => Row::Apply,
-                }
-            } else {
-                match o {
-                    0 => Row::Effort,
-                    1 => Row::Scope,
-                    2 => Row::CoAuthor,
-                    _ => Row::Apply,
-                }
+            match o {
+                0 => Row::Effort,
+                1 => Row::Scope,
+                2 => Row::CoAuthor,
+                3 if self.has_variant_row => Row::Variant,
+                3 | 4 if self.has_auto_compact_row() => Row::AutoCompact,
+                _ => Row::Apply,
             }
         }
     }
@@ -247,6 +278,21 @@ impl App {
         }
         Some(self.variant_aliases[self.variant_idx].1)
     }
+    pub fn has_auto_compact_row(&self) -> bool {
+        !self.auto_compact_windows.is_empty()
+    }
+    pub fn auto_compact_label(&self) -> Option<&'static str> {
+        if !self.has_auto_compact_row() {
+            return None;
+        }
+        Some(self.auto_compact_windows[self.auto_compact_idx].label())
+    }
+    pub fn auto_compact_window(&self) -> Option<AutoCompactWindow> {
+        if !self.has_auto_compact_row() {
+            return None;
+        }
+        Some(self.auto_compact_windows[self.auto_compact_idx])
+    }
 
     /// Build a template instance reflecting the current variant choice (for
     /// previewing model / base URL).
@@ -268,10 +314,14 @@ impl App {
             .and_then(|i| self.sources.get(i))
             .map(|s| s.api_key().to_string())
             .unwrap_or_else(|| "sk-preview".to_string());
-        let settings = inst.create_settings(&key, &SnapshotScope::Common);
-        let model = settings
-            .model
-            .unwrap_or_else(|| "(default)".to_string());
+        let settings = inst
+            .create_settings_with_auto_compact(
+                &key,
+                &SnapshotScope::Common,
+                self.auto_compact_window(),
+            )
+            .unwrap_or_else(|_| inst.create_settings(&key, &SnapshotScope::Common));
+        let model = settings.model.unwrap_or_else(|| "(default)".to_string());
         let base = settings
             .env
             .as_ref()
@@ -326,6 +376,7 @@ impl App {
                 Row::Scope => self.cycle_scope(1),
                 Row::CoAuthor => self.co_author = !self.co_author,
                 Row::Variant => self.cycle_variant(1),
+                Row::AutoCompact => self.cycle_auto_compact(1),
                 Row::Apply => return self.build_apply(),
             },
             KeyCode::Char('a') => return self.build_apply(),
@@ -365,6 +416,7 @@ impl App {
             Row::Scope => self.cycle_scope(dir),
             Row::CoAuthor => self.co_author = !self.co_author,
             Row::Variant => self.cycle_variant(dir),
+            Row::AutoCompact => self.cycle_auto_compact(dir),
             _ => {}
         }
     }
@@ -383,14 +435,37 @@ impl App {
             return;
         }
         self.variant_idx = ((self.variant_idx as i32 + dir).rem_euclid(n)) as usize;
+        self.refresh_auto_compact_windows();
+    }
+    fn refresh_auto_compact_windows(&mut self) {
+        let current = self.auto_compact_window();
+        let alias = if self.has_variant_row {
+            self.variant_aliases[self.variant_idx].0
+        } else {
+            self.target.as_str()
+        };
+        self.auto_compact_windows = supported_auto_compact_windows_for(&self.template_type, alias);
+        self.auto_compact_idx = current
+            .and_then(|value| self.auto_compact_windows.iter().position(|x| *x == value))
+            .unwrap_or(0);
+        let total = self.total_rows();
+        if total > 0 && self.cursor >= total {
+            self.cursor = total - 1;
+        }
+    }
+    fn cycle_auto_compact(&mut self, dir: i32) {
+        let n = self.auto_compact_windows.len() as i32;
+        if n == 0 {
+            return;
+        }
+        self.auto_compact_idx = ((self.auto_compact_idx as i32 + dir).rem_euclid(n)) as usize;
     }
 
     fn build_apply(&mut self) -> Outcome {
-        let Some(idx) = self.selected_key
-            else {
-                self.mode = Mode::Message("No key selected — add one first (n or ➕).".into());
-                return Outcome::Continue;
-            };
+        let Some(idx) = self.selected_key else {
+            self.mode = Mode::Message("No key selected — add one first (n or ➕).".into());
+            return Outcome::Continue;
+        };
         let Some(src) = self.sources.get(idx).cloned() else {
             self.mode = Mode::Message("Selected key no longer available.".into());
             return Outcome::Continue;
@@ -414,6 +489,7 @@ impl App {
             } else {
                 None
             },
+            auto_compact_window: self.auto_compact_window(),
         })
     }
 
@@ -462,7 +538,11 @@ impl App {
         if let Some(s) = self.selected_key
             && s >= self.sources.len()
         {
-            self.selected_key = if self.sources.is_empty() { None } else { Some(0) };
+            self.selected_key = if self.sources.is_empty() {
+                None
+            } else {
+                Some(0)
+            };
         }
     }
 
@@ -513,12 +593,7 @@ impl App {
         Outcome::Continue
     }
 
-    fn handle_input_rename(
-        &mut self,
-        key: KeyEvent,
-        idx: usize,
-        mut input: TextInput,
-    ) -> Outcome {
+    fn handle_input_rename(&mut self, key: KeyEvent, idx: usize, mut input: TextInput) -> Outcome {
         match key.code {
             KeyCode::Esc => self.mode = Mode::Normal,
             KeyCode::Enter => {
@@ -602,11 +677,7 @@ mod snapshot_tests {
     use crate::credentials::CredentialData;
     use crate::templates::TemplateType;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use ratatui::{
-        Terminal,
-        backend::TestBackend,
-        layout::Position,
-    };
+    use ratatui::{Terminal, backend::TestBackend, layout::Position};
 
     fn cred(name: &str, key: &str, last_used: Option<&str>) -> SavedCredentialStub {
         // SavedCredential == CredentialData
@@ -647,6 +718,13 @@ mod snapshot_tests {
             variant_aliases: variant_options(&TemplateType::Zai),
             variant_idx: 0,
             has_variant_row: true,
+            auto_compact_windows: vec![
+                AutoCompactWindow::K896,
+                AutoCompactWindow::K768,
+                AutoCompactWindow::K512,
+                AutoCompactWindow::K256,
+            ],
+            auto_compact_idx: 0,
             mode: Mode::Normal,
         }
     }
@@ -685,7 +763,10 @@ mod snapshot_tests {
     fn snapshot_states() {
         // 1. initial
         let app = base_app();
-        banner("1. INITIAL (cursor on work key, zai generic → variant row)", &render(&app, 76, 22));
+        banner(
+            "1. INITIAL (cursor on work key, zai generic → variant row)",
+            &render(&app, 76, 22),
+        );
 
         // 2. cursor into options
         let mut app = base_app();
@@ -726,5 +807,41 @@ mod snapshot_tests {
         // 8. narrow terminal
         let app = base_app();
         banner("8. NARROW 52x18", &render(&app, 52, 18));
+    }
+
+    #[test]
+    fn auto_compact_row_changes_preview_and_selection() {
+        let mut app = base_app();
+        app.cursor = 8; // 3 keys + new-key + effort + scope + co-author + variant
+
+        app.handle_event(key(KeyCode::Right));
+
+        assert_eq!(app.auto_compact_window(), Some(AutoCompactWindow::K768));
+        assert_eq!(
+            app.preview_model_and_base().0,
+            "glm-5.2[1m]",
+            "auto compact must not remove the [1m] model suffix"
+        );
+
+        match app.handle_event(key(KeyCode::Char('a'))) {
+            Outcome::Apply(selection) => {
+                assert_eq!(selection.auto_compact_window, Some(AutoCompactWindow::K768));
+            }
+            _ => panic!("expected apply outcome"),
+        }
+    }
+
+    #[test]
+    fn auto_compact_row_requires_supported_1m_template() {
+        let mut app = base_app();
+        app.template_type = TemplateType::DeepSeek;
+        app.target = "deepseek".into();
+        app.variant_aliases.clear();
+        app.has_variant_row = false;
+        app.refresh_auto_compact_windows();
+
+        assert_eq!(app.preview_model_and_base().0, "deepseek-v4-pro[1m]");
+        assert!(!app.has_auto_compact_row());
+        assert_eq!(app.auto_compact_window(), None);
     }
 }

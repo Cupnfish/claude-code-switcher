@@ -142,6 +142,7 @@ ccs apply zai --dry-run        # 预览将写入的设置，不实际写入
 ccs apply zai --switch-key      # 强制弹出 API key 选择，忽略记住的 key
 ccs apply zai-china             # 指定变体（也可用 --variant zai-china）
 ccs apply zai --effort max      # 本次覆盖默认 effort
+ccs apply zai --auto-compact 512k # 选择自动压缩阈值（896k/768k/512k/256k，默认 896k；仅 1M 模型支持）
 ccs apply zai --api-key sk-...  # 直接指定 key，跳过选择（别名 --key）
 ccs apply zai --scope env       # 只切换 env 变量
 ccs apply zai --backup          # 应用前备份当前设置
@@ -245,6 +246,9 @@ ccs apply zai --yes
 
 # 覆盖模型设置
 ccs apply deepseek --model "claude-3-5-sonnet-20241022"
+
+# 覆盖自动压缩阈值（目前支持 ZAI：896k、768k、512k、256k；默认 896k）
+ccs apply zai --auto-compact 256k
 
 # 指定配置文件路径
 ccs apply zai --settings-path ~/.claude/settings.json

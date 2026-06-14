@@ -5,12 +5,12 @@ use crate::{
     settings::{Attribution, ClaudeSettings},
     snapshots::{self, SnapshotScope, SnapshotStore},
     templates::{
-        TemplateType, get_all_templates, get_template_instance, get_template_instance_with_input,
-        get_template_type, is_generic_target, variant_options,
+        AutoCompactWindow, TemplateType, get_all_templates, get_template_instance,
+        get_template_instance_with_input, get_template_type, is_generic_target,
+        supports_auto_compact_option, variant_options,
     },
     utils::{
-        backup_settings, confirm_action, get_credentials_dir, get_settings_path,
-        get_snapshots_dir,
+        backup_settings, confirm_action, get_credentials_dir, get_settings_path, get_snapshots_dir,
     },
 };
 use anyhow::{Result, anyhow};
@@ -134,6 +134,7 @@ pub fn run_command(args: &crate::Cli) -> Result<()> {
             yes,
             cli,
             effort,
+            auto_compact,
             api_key,
             no_co_author,
             switch_key,
@@ -148,6 +149,7 @@ pub fn run_command(args: &crate::Cli) -> Result<()> {
             *yes,
             *cli,
             effort,
+            auto_compact,
             api_key,
             *no_co_author,
             *switch_key,
@@ -245,6 +247,7 @@ pub fn apply_command(
     yes: bool,
     cli: bool,
     effort: &Option<String>,
+    auto_compact: &Option<String>,
     api_key: &Option<String>,
     no_co_author: bool,
     switch_key: bool,
@@ -265,6 +268,7 @@ pub fn apply_command(
             yes,
             cli,
             effort,
+            auto_compact,
             api_key,
             no_co_author,
             switch_key,
@@ -321,6 +325,62 @@ fn resolve_co_author_off(no_co_author: bool, prefs: &Prefs) -> bool {
     no_co_author || !prefs.default_co_author
 }
 
+/// Resolve the auto-compaction threshold for providers that expose it.
+/// Returns `None` for providers that do not support it.
+fn resolve_auto_compact_window(
+    template_type: &TemplateType,
+    template: &dyn crate::templates::Template,
+    flag: Option<&str>,
+    prefs: &Prefs,
+) -> Result<Option<AutoCompactWindow>> {
+    if !supports_auto_compact_option(template) {
+        if let Some(value) = flag.map(str::trim).filter(|v| !v.is_empty()) {
+            return Err(anyhow!(
+                "{} does not support auto-compact thresholds (got '{}')",
+                template.display_name(),
+                value
+            ));
+        }
+        return Ok(None);
+    }
+
+    let supported = template.supported_auto_compact_windows();
+
+    let parsed = if let Some(value) = flag.map(str::trim).filter(|v| !v.is_empty()) {
+        Some(value.parse::<AutoCompactWindow>()?)
+    } else {
+        prefs
+            .template_pref(template_type)
+            .and_then(|p| {
+                p.last_auto_compact_window
+                    .as_deref()
+                    .or(p.last_context_window.as_deref())
+            })
+            .map(str::parse::<AutoCompactWindow>)
+            .transpose()?
+    };
+
+    let auto_compact_window = parsed
+        .or_else(|| template.default_auto_compact_window())
+        .expect("supported auto-compact windows should have a default");
+
+    if !supported.contains(&auto_compact_window) {
+        let choices = supported
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(anyhow!(
+            "{} does not support auto-compact threshold '{}'. Use one of: {}",
+            template.display_name(),
+            auto_compact_window,
+            choices
+        ));
+    }
+
+    Ok(Some(auto_compact_window))
+}
+
 /// Resolve the variant alias for a generic target (remembering / prompting).
 /// Returns `None` for specific aliases or templates with no variants (use the
 /// target as-is).
@@ -368,10 +428,13 @@ fn resolve_variant_alias(
         .iter()
         .map(|(alias, label)| format!("{}  ({})", label, alias))
         .collect();
-    let choice = inquire::Select::new(&format!("Select {} variant:", template_type), labels.clone())
-        .with_help_message("↑/↓ navigate, Enter select, Esc cancel")
-        .prompt()
-        .map_err(|e| anyhow!("Variant selection failed: {}", e))?;
+    let choice = inquire::Select::new(
+        &format!("Select {} variant:", template_type),
+        labels.clone(),
+    )
+    .with_help_message("↑/↓ navigate, Enter select, Esc cancel")
+    .prompt()
+    .map_err(|e| anyhow!("Variant selection failed: {}", e))?;
     let idx = labels.iter().position(|l| l == &choice).unwrap();
     let alias = options[idx].0.to_string();
     prefs.set_variant(template_type, Some(alias.clone()));
@@ -401,7 +464,12 @@ fn detect_current_provider_label() -> String {
 }
 
 /// Print a concise summary of what is being applied.
-fn print_apply_summary(template_type: &TemplateType, settings: &ClaudeSettings, key: &str) {
+fn print_apply_summary(
+    template_type: &TemplateType,
+    settings: &ClaudeSettings,
+    key: &str,
+    auto_compact_window: Option<AutoCompactWindow>,
+) {
     println!();
     println!("{} applying '{}'", style("•").cyan(), template_type);
     if let Some(m) = &settings.model {
@@ -410,6 +478,9 @@ fn print_apply_summary(template_type: &TemplateType, settings: &ClaudeSettings, 
     println!("  key:    {}", mask_api_key(key));
     if let Some(e) = &settings.effort_level {
         println!("  effort: {}", e);
+    }
+    if let Some(auto_compact_window) = auto_compact_window {
+        println!("  compact: {}", auto_compact_window);
     }
     if let Some(base) = settings
         .env
@@ -432,6 +503,7 @@ fn apply_template_command(
     yes: bool,
     cli: bool,
     effort: &Option<String>,
+    auto_compact: &Option<String>,
     api_key: &Option<String>,
     no_co_author: bool,
     switch_key: bool,
@@ -443,8 +515,9 @@ fn apply_template_command(
     let use_tui = !non_interactive && !yes;
     let mut prefs = Prefs::load_or_default();
 
-    // Gather intent: (variant alias, key, effort, scope, co-author-off).
-    let (variant_alias, key_choice, effort, scope, co_author_off) = if use_tui {
+    // Gather intent: (variant alias, key, effort, compact, scope, co-author-off).
+    let (variant_alias, key_choice, effort, auto_compact_window, scope, co_author_off) = if use_tui
+    {
         let display = get_template_instance(template_type)
             .display_name()
             .to_string();
@@ -460,6 +533,7 @@ fn apply_template_command(
                 sel.variant,
                 sel.key,
                 sel.effort,
+                sel.auto_compact_window,
                 sel.scope,
                 sel.co_author_off,
             ),
@@ -493,16 +567,26 @@ fn apply_template_command(
         .ok_or_else(|| anyhow!("Cancelled"))?;
         prefs.set_last_key(template_type, kc.source.clone());
         let eff = resolve_effort(effort.as_deref(), &prefs, non_interactive);
+        let preview_template =
+            get_template_instance_with_input(template_type, va.as_deref().unwrap_or(target));
+        let compact = resolve_auto_compact_window(
+            template_type,
+            preview_template.as_ref(),
+            auto_compact.as_deref(),
+            &prefs,
+        )?;
         let cao = resolve_co_author_off(no_co_author, &prefs);
-        (va, kc, eff, scope.clone(), cao)
+        (va, kc, eff, compact, scope.clone(), cao)
     };
 
     // Build template settings from the resolved alias + key + scope.
-    let template_instance = get_template_instance_with_input(
-        template_type,
-        variant_alias.as_deref().unwrap_or(target),
-    );
-    let mut settings = template_instance.create_settings(&key_choice.key, &scope);
+    let template_instance =
+        get_template_instance_with_input(template_type, variant_alias.as_deref().unwrap_or(target));
+    let mut settings = template_instance.create_settings_with_auto_compact(
+        &key_choice.key,
+        &scope,
+        auto_compact_window,
+    )?;
     inject_common_env_vars(&mut settings);
 
     // Windows: CLAUDE_CODE_GIT_BASH_PATH — always auto-detect (never prompt;
@@ -538,13 +622,10 @@ fn apply_template_command(
         backup_settings(settings_path)?;
     }
 
-    print_apply_summary(template_type, &merged, &key_choice.key);
+    print_apply_summary(template_type, &merged, &key_choice.key, auto_compact_window);
 
     if dry_run {
-        println!(
-            "{} (dry-run — no changes written)",
-            style("•").yellow()
-        );
+        println!("{} (dry-run — no changes written)", style("•").yellow());
         prefs.save()?;
         return Ok(());
     }
@@ -558,6 +639,7 @@ fn apply_template_command(
         scope.clone(),
         effort.clone(),
         !co_author_off,
+        auto_compact_window,
     );
     prefs.save()?;
 
@@ -680,7 +762,10 @@ pub fn config_command(cfg: &cli::ConfigArgs) -> Result<()> {
     if cfg.reset {
         prefs = Prefs::default();
         prefs.save()?;
-        println!("{} Reset all preferences to defaults.", style("✓").green().bold());
+        println!(
+            "{} Reset all preferences to defaults.",
+            style("✓").green().bold()
+        );
         return Ok(());
     }
 
@@ -744,11 +829,12 @@ fn config_interactive(prefs: &mut Prefs) -> Result<()> {
             "Edit default scope" => {
                 let scopes = vec!["common", "env", "all"];
                 if let Ok(s) = inquire::Select::new("Default scope:", scopes).prompt()
-                    && let Ok(scope) = s.parse::<SnapshotScope>() {
-                        prefs.default_scope = scope;
-                        prefs.save()?;
-                        println!("{} default scope = {}", style("✓").green(), s);
-                    }
+                    && let Ok(scope) = s.parse::<SnapshotScope>()
+                {
+                    prefs.default_scope = scope;
+                    prefs.save()?;
+                    println!("{} default scope = {}", style("✓").green(), s);
+                }
             }
             _ => break,
         }
@@ -758,7 +844,11 @@ fn config_interactive(prefs: &mut Prefs) -> Result<()> {
 
 fn print_config(prefs: &Prefs) {
     println!();
-    println!("{} Preferences ({})", style("•").cyan(), Prefs::path().display());
+    println!(
+        "{} Preferences ({})",
+        style("•").cyan(),
+        Prefs::path().display()
+    );
     println!(
         "  default effort:   {}",
         prefs.default_effort.as_deref().unwrap_or("(unset)")
@@ -802,9 +892,9 @@ pub fn current_command() -> Result<()> {
         && let Some(k) = env
             .get("ANTHROPIC_AUTH_TOKEN")
             .or_else(|| env.get("ANTHROPIC_API_KEY"))
-        {
-            println!("Key:      {}", mask_api_key(k));
-        }
+    {
+        println!("Key:      {}", mask_api_key(k));
+    }
     if let Some(e) = &settings.effort_level {
         println!("Effort:   {}", e);
     }

@@ -11,7 +11,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::snapshots::SnapshotScope;
-use crate::templates::TemplateType;
+use crate::templates::{AutoCompactWindow, TemplateType};
 
 /// Current prefs data-format version.
 pub const PREFS_VERSION: &str = "v1";
@@ -49,6 +49,15 @@ pub struct TemplatePref {
     /// Last-used co-author setting for this template (`true` = enabled).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_co_author: Option<bool>,
+
+    /// Last-used auto-compaction threshold for templates that support it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_auto_compact_window: Option<String>,
+
+    /// Backward-compatible read for older prefs written during the initial
+    /// context-window implementation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_context_window: Option<String>,
 
     /// Timestamp of the last apply for this template.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -193,6 +202,18 @@ impl Prefs {
         pref.last_used_at = Some(crate::utils::get_timestamp());
     }
 
+    /// Record the last-used auto-compaction threshold for a template type.
+    pub fn set_last_auto_compact_window(
+        &mut self,
+        template_type: &TemplateType,
+        auto_compact_window: Option<AutoCompactWindow>,
+    ) {
+        let pref = self.template_pref_mut(template_type);
+        pref.last_auto_compact_window = auto_compact_window.map(|c| c.to_string());
+        pref.last_context_window = None;
+        pref.last_used_at = Some(crate::utils::get_timestamp());
+    }
+
     /// Record everything from a completed apply in one go.
     pub fn record_apply(
         &mut self,
@@ -202,6 +223,7 @@ impl Prefs {
         scope: SnapshotScope,
         effort: Option<String>,
         co_author: bool,
+        auto_compact_window: Option<AutoCompactWindow>,
     ) {
         let pref = self.template_pref_mut(template_type);
         pref.variant = variant;
@@ -209,6 +231,8 @@ impl Prefs {
         pref.last_scope = Some(scope);
         pref.last_effort = effort;
         pref.last_co_author = Some(co_author);
+        pref.last_auto_compact_window = auto_compact_window.map(|c| c.to_string());
+        pref.last_context_window = None;
         pref.last_used_at = Some(crate::utils::get_timestamp());
     }
 }
@@ -248,6 +272,24 @@ mod tests {
     }
 
     #[test]
+    fn test_prefs_auto_compact_window_roundtrip() {
+        let mut prefs = Prefs::default();
+        prefs.set_last_auto_compact_window(&TemplateType::Zai, Some(AutoCompactWindow::K512));
+
+        let json = serde_json::to_string(&prefs).unwrap();
+        let restored: Prefs = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(
+            restored
+                .template_pref(&TemplateType::Zai)
+                .unwrap()
+                .last_auto_compact_window
+                .as_deref(),
+            Some("512k")
+        );
+    }
+
+    #[test]
     fn test_prefs_template_absent_by_default() {
         let prefs = Prefs::default();
         assert!(prefs.template_pref(&TemplateType::DeepSeek).is_none());
@@ -271,7 +313,11 @@ mod tests {
         let mut prefs = Prefs::default();
         prefs.set_variant(&TemplateType::Kimi, Some("k2".to_string()));
         assert_eq!(
-            prefs.template_pref(&TemplateType::Kimi).unwrap().variant.as_deref(),
+            prefs
+                .template_pref(&TemplateType::Kimi)
+                .unwrap()
+                .variant
+                .as_deref(),
             Some("k2")
         );
     }

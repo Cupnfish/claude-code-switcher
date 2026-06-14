@@ -3,7 +3,7 @@
 use crate::{
     settings::{ClaudeSettings, Permissions},
     snapshots::SnapshotScope,
-    templates::Template,
+    templates::{AUTO_COMPACT_WINDOWS, AutoCompactWindow, Template},
 };
 use anyhow::{Result, anyhow};
 use atty;
@@ -18,6 +18,13 @@ pub enum ZaiRegion {
 }
 
 impl ZaiRegion {
+    pub fn base_model_name(&self) -> &'static str {
+        match self {
+            ZaiRegion::China => "glm-5.2",
+            ZaiRegion::International => "glm-5.2",
+        }
+    }
+
     pub fn display_name(&self) -> &'static str {
         match self {
             ZaiRegion::China => "ZAI China (智谱AI)",
@@ -43,11 +50,8 @@ impl ZaiRegion {
         }
     }
 
-    pub fn model_name(&self) -> &'static str {
-        match self {
-            ZaiRegion::China => "glm-5.2[1m]",
-            ZaiRegion::International => "glm-5.2[1m]",
-        }
+    pub fn model_name(&self) -> String {
+        format!("{}[1m]", self.base_model_name())
     }
 
     pub fn api_key_url(&self) -> &'static str {
@@ -82,6 +86,97 @@ impl ZaiTemplate {
 
     pub fn international() -> Self {
         Self::new(ZaiRegion::International)
+    }
+
+    fn create_settings_for_auto_compact(
+        &self,
+        api_key: &str,
+        scope: &SnapshotScope,
+        auto_compact_window: AutoCompactWindow,
+    ) -> ClaudeSettings {
+        let mut settings = ClaudeSettings::new();
+        let model_name = self.region.model_name();
+
+        if matches!(scope, SnapshotScope::Common | SnapshotScope::All) {
+            settings.model = Some(model_name.clone());
+
+            // Disable co-authored-by in git commits
+            settings.attribution = Some(crate::settings::Attribution {
+                commit: Some(String::new()),
+                pr: Some(String::new()),
+            });
+
+            // Use the new permissions format from the provided version
+            settings.permissions = Some(Permissions {
+                allow: Some(vec![
+                    "Bash".to_string(),
+                    "Read".to_string(),
+                    "Write".to_string(),
+                    "Edit".to_string(),
+                    "MultiEdit".to_string(),
+                    "Glob".to_string(),
+                    "Grep".to_string(),
+                    "WebFetch".to_string(),
+                ]),
+                ask: None,
+                deny: Some(vec!["WebSearch".to_string()]),
+                additional_directories: None,
+                default_mode: None,
+                disable_bypass_permissions_mode: None,
+            });
+        }
+
+        if matches!(
+            scope,
+            SnapshotScope::Env | SnapshotScope::Common | SnapshotScope::All
+        ) {
+            let mut env = HashMap::new();
+            env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.to_string());
+            env.insert(
+                "ANTHROPIC_BASE_URL".to_string(),
+                self.region.base_url().to_string(),
+            );
+            env.insert("API_TIMEOUT_MS".to_string(), "3000000".to_string());
+            env.insert("ANTHROPIC_MODEL".to_string(), model_name.clone());
+            env.insert(
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
+                "glm-4.5-air".to_string(),
+            );
+            env.insert(
+                "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
+                self.region.base_model_name().to_string(),
+            );
+            env.insert(
+                "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
+                self.region.base_model_name().to_string(),
+            );
+            env.insert("ENABLE_THINKING".to_string(), "true".to_string());
+            env.insert("REASONING_EFFORT".to_string(), "max".to_string());
+            env.insert("ENABLE_STREAMING".to_string(), "true".to_string());
+            env.insert(
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
+                auto_compact_window.env_value().to_string(),
+            );
+            env.insert("MAX_OUTPUT_TOKENS".to_string(), "128000".to_string());
+            env.insert(
+                "CLAUDE_CODE_MAX_OUTPUT_TOKENS".to_string(),
+                "128000".to_string(),
+            );
+            env.insert("MAX_MCP_OUTPUT_TOKENS".to_string(), "64000".to_string());
+            env.insert("AUTH_HEADER_MODE".to_string(), "x-api-key".to_string());
+            env.insert(
+                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),
+                "1".to_string(),
+            );
+            env.insert("ENABLE_TOOL_SEARCH".to_string(), "0".to_string());
+            env.insert(
+                "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS".to_string(),
+                "1".to_string(),
+            );
+            settings.env = Some(env);
+        }
+
+        settings
     }
 }
 
@@ -163,91 +258,31 @@ impl Template for ZaiTemplate {
     }
 
     fn create_settings(&self, api_key: &str, scope: &SnapshotScope) -> ClaudeSettings {
-        let mut settings = ClaudeSettings::new();
+        self.create_settings_for_auto_compact(api_key, scope, AutoCompactWindow::K896)
+    }
 
-        if matches!(scope, SnapshotScope::Common | SnapshotScope::All) {
-            settings.model = Some(self.region.model_name().to_string());
+    fn supported_auto_compact_windows(&self) -> &'static [AutoCompactWindow] {
+        &AUTO_COMPACT_WINDOWS
+    }
 
-            // Disable co-authored-by in git commits
-            settings.attribution = Some(crate::settings::Attribution {
-                commit: Some(String::new()),
-                pr: Some(String::new()),
-            });
-
-            // Use the new permissions format from the provided version
-            settings.permissions = Some(Permissions {
-                allow: Some(vec![
-                    "Bash".to_string(),
-                    "Read".to_string(),
-                    "Write".to_string(),
-                    "Edit".to_string(),
-                    "MultiEdit".to_string(),
-                    "Glob".to_string(),
-                    "Grep".to_string(),
-                    "WebFetch".to_string(),
-                ]),
-                ask: None,
-                deny: Some(vec!["WebSearch".to_string()]),
-                additional_directories: None,
-                default_mode: None,
-                disable_bypass_permissions_mode: None,
-            });
+    fn create_settings_with_auto_compact(
+        &self,
+        api_key: &str,
+        scope: &SnapshotScope,
+        auto_compact_window: Option<AutoCompactWindow>,
+    ) -> Result<ClaudeSettings> {
+        let auto_compact_window = auto_compact_window.unwrap_or(AutoCompactWindow::K896);
+        if !self
+            .supported_auto_compact_windows()
+            .contains(&auto_compact_window)
+        {
+            return Err(anyhow!(
+                "{} does not support auto-compact window '{}'",
+                self.display_name(),
+                auto_compact_window
+            ));
         }
-
-        if matches!(
-            scope,
-            SnapshotScope::Env | SnapshotScope::Common | SnapshotScope::All
-        ) {
-            let mut env = HashMap::new();
-            env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.to_string());
-            env.insert(
-                "ANTHROPIC_BASE_URL".to_string(),
-                self.region.base_url().to_string(),
-            );
-            env.insert("API_TIMEOUT_MS".to_string(), "3000000".to_string());
-            env.insert(
-                "ANTHROPIC_MODEL".to_string(),
-                self.region.model_name().to_string(),
-            );
-            env.insert(
-                "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
-                "glm-4.5-air".to_string(),
-            );
-            env.insert(
-                "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
-                self.region.model_name().to_string(),
-            );
-            env.insert(
-                "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
-                self.region.model_name().to_string(),
-            );
-            env.insert("ENABLE_THINKING".to_string(), "true".to_string());
-            env.insert("REASONING_EFFORT".to_string(), "max".to_string());
-            env.insert("ENABLE_STREAMING".to_string(), "true".to_string());
-            env.insert(
-                "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
-                "1000000".to_string(),
-            );
-            env.insert("MAX_OUTPUT_TOKENS".to_string(), "128000".to_string());
-            env.insert(
-                "CLAUDE_CODE_MAX_OUTPUT_TOKENS".to_string(),
-                "128000".to_string(),
-            );
-            env.insert("MAX_MCP_OUTPUT_TOKENS".to_string(), "64000".to_string());
-            env.insert("AUTH_HEADER_MODE".to_string(), "x-api-key".to_string());
-            env.insert(
-                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),
-                "1".to_string(),
-            );
-            env.insert("ENABLE_TOOL_SEARCH".to_string(), "0".to_string());
-            env.insert(
-                "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS".to_string(),
-                "1".to_string(),
-            );
-            settings.env = Some(env);
-        }
-
-        settings
+        Ok(self.create_settings_for_auto_compact(api_key, scope, auto_compact_window))
     }
 }
 
@@ -255,4 +290,92 @@ impl Template for ZaiTemplate {
 pub fn create_zai_template(api_key: &str, scope: &SnapshotScope) -> ClaudeSettings {
     let template = ZaiTemplate::china(); // Default to China for backward compatibility
     template.create_settings(api_key, scope)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zai_defaults_to_1m_context() {
+        let settings = ZaiTemplate::china().create_settings("sk-test", &SnapshotScope::Common);
+
+        assert_eq!(settings.model.as_deref(), Some("glm-5.2[1m]"));
+        let env = settings.env.unwrap();
+        assert_eq!(
+            env.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("glm-5.2[1m]")
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_DEFAULT_SONNET_MODEL")
+                .map(String::as_str),
+            Some("glm-5.2")
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_DEFAULT_OPUS_MODEL").map(String::as_str),
+            Some("glm-5.2")
+        );
+        assert_eq!(
+            env.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW")
+                .map(String::as_str),
+            Some("896000")
+        );
+    }
+
+    #[test]
+    fn zai_accepts_512k_auto_compact() {
+        let settings = ZaiTemplate::china()
+            .create_settings_with_auto_compact(
+                "sk-test",
+                &SnapshotScope::Common,
+                Some(AutoCompactWindow::K512),
+            )
+            .unwrap();
+
+        assert_eq!(settings.model.as_deref(), Some("glm-5.2[1m]"));
+        let env = settings.env.unwrap();
+        assert_eq!(
+            env.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("glm-5.2[1m]")
+        );
+        assert_eq!(
+            env.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW")
+                .map(String::as_str),
+            Some("512000")
+        );
+    }
+
+    #[test]
+    fn zai_accepts_256k_auto_compact() {
+        let settings = ZaiTemplate::international()
+            .create_settings_with_auto_compact(
+                "sk-test",
+                &SnapshotScope::Common,
+                Some(AutoCompactWindow::K256),
+            )
+            .unwrap();
+
+        assert_eq!(settings.model.as_deref(), Some("glm-5.2[1m]"));
+        let env = settings.env.unwrap();
+        assert_eq!(
+            env.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("glm-5.2[1m]")
+        );
+        assert_eq!(
+            env.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW")
+                .map(String::as_str),
+            Some("256000")
+        );
+    }
+
+    #[test]
+    fn zai_defaults_auto_compact_to_896k() {
+        let settings = ZaiTemplate::china().create_settings("sk-test", &SnapshotScope::Common);
+        let env = settings.env.unwrap();
+        assert_eq!(
+            env.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW")
+                .map(String::as_str),
+            Some("896000")
+        );
+    }
 }

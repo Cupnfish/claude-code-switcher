@@ -1,11 +1,11 @@
 //! ratatui rendering for the apply TUI.
 
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
-    Frame,
 };
 
 use crate::credentials::{ApiKeySource, mask_api_key};
@@ -16,11 +16,7 @@ const CURSOR: &str = "❯ ";
 const NONE_CURSOR: &str = "  ";
 
 fn cursor_prefix(is_cursor: bool) -> &'static str {
-    if is_cursor {
-        CURSOR
-    } else {
-        NONE_CURSOR
-    }
+    if is_cursor { CURSOR } else { NONE_CURSOR }
 }
 
 /// A line that may be a selectable row (carrying its row index) or decoration.
@@ -35,7 +31,9 @@ fn header(text: &str) -> RowLine {
         row: None,
         line: Line::styled(
             format!(" {text}"),
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
         ),
     }
 }
@@ -46,7 +44,11 @@ pub fn render(frame: &mut Frame, app: &App) {
     // Layout: title (3) | body (flex) | help (1)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(10), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(10),
+            Constraint::Length(1),
+        ])
         .split(area);
 
     render_title(frame, app, chunks[0]);
@@ -73,12 +75,10 @@ fn render_title(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_body(frame: &mut Frame, app: &App, area: Rect) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(Span::styled(
-            " ↑/↓ move · ←/→ change · Enter select/apply · a apply ",
-            Style::default().fg(Color::DarkGray),
-        ));
+    let block = Block::default().borders(Borders::ALL).title(Span::styled(
+        " ↑/↓ move · ←/→ change · Enter select/apply · a apply ",
+        Style::default().fg(Color::DarkGray),
+    ));
 
     let mut rows: Vec<RowLine> = Vec::new();
 
@@ -175,10 +175,15 @@ fn render_body(frame: &mut Frame, app: &App, area: Rect) {
     ));
     row_idx += 1;
     if app.has_variant_row()
-        && let Some(label) = app.variant_label() {
-            rows.push(option_row("Variant  ", label, cur == row_idx));
-            row_idx += 1;
-        }
+        && let Some(label) = app.variant_label()
+    {
+        rows.push(option_row("Variant  ", label, cur == row_idx));
+        row_idx += 1;
+    }
+    if let Some(label) = app.auto_compact_label() {
+        rows.push(option_row("Compact  ", label, cur == row_idx));
+        row_idx += 1;
+    }
 
     // Preview section
     rows.push(header("Preview"));
@@ -200,7 +205,10 @@ fn render_body(frame: &mut Frame, app: &App, area: Rect) {
         ]),
     ];
     for pl in preview_lines {
-        rows.push(RowLine { row: None, line: pl });
+        rows.push(RowLine {
+            row: None,
+            line: pl,
+        });
     }
 
     // Apply row
@@ -225,7 +233,9 @@ fn render_body(frame: &mut Frame, app: &App, area: Rect) {
 
     // Render all rows; the `❯` prefix already marks the cursor line.
     let lines: Vec<Line> = rows.iter().map(|r| r.line.clone()).collect();
-    let p = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
+    let p = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false });
     frame.render_widget(p, area);
 }
 
@@ -267,7 +277,9 @@ fn render_popup(frame: &mut Frame, app: &App) {
                 Line::from(vec![
                     Span::styled(
                         " Enter",
-                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
                     ),
                     Span::raw(" confirm   "),
                     Span::styled("Esc", Style::default().fg(Color::Yellow)),
@@ -276,11 +288,7 @@ fn render_popup(frame: &mut Frame, app: &App) {
             ],
             6,
         ),
-        Mode::Help => (
-            "Help".to_string(),
-            help_lines(),
-            11,
-        ),
+        Mode::Help => ("Help".to_string(), help_lines(), 11),
         Mode::Message(msg) => (
             "Notice".to_string(),
             vec![
@@ -348,7 +356,9 @@ fn input_popup(title: &str, prompt: &str, input: &TextInput) -> (String, Vec<Lin
         Line::from(vec![
             Span::styled(
                 " Enter",
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::raw(" confirm   "),
             Span::styled("Esc", Style::default().fg(Color::Yellow)),

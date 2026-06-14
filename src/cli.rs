@@ -55,8 +55,21 @@ pub enum Commands {
         #[arg(long, help = "Set effort level (overrides the default in your config)")]
         effort: Option<String>,
 
+        /// Auto-compact threshold for supported 1M-context providers (896k/768k/512k/256k)
+        #[arg(
+            long = "auto-compact",
+            visible_alias = "compact",
+            alias = "context",
+            help = "Set auto-compact threshold for supported 1M providers (896k/768k/512k/256k)"
+        )]
+        auto_compact: Option<String>,
+
         /// API key to use (skips interactive selection)
-        #[arg(long, visible_alias = "key", help = "API key to use (skips interactive selection)")]
+        #[arg(
+            long,
+            visible_alias = "key",
+            help = "API key to use (skips interactive selection)"
+        )]
         api_key: Option<String>,
 
         /// Disable co-authored-by attribution in commits/PRs

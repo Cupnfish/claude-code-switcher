@@ -9,6 +9,75 @@ use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Selectable auto-compaction threshold for providers that run a 1M context
+/// model and should compact before the full window is exhausted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoCompactWindow {
+    K256,
+    K512,
+    K768,
+    K896,
+}
+
+pub const AUTO_COMPACT_WINDOWS: [AutoCompactWindow; 4] = [
+    AutoCompactWindow::K896,
+    AutoCompactWindow::K768,
+    AutoCompactWindow::K512,
+    AutoCompactWindow::K256,
+];
+
+impl AutoCompactWindow {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AutoCompactWindow::K256 => "256k",
+            AutoCompactWindow::K512 => "512k",
+            AutoCompactWindow::K768 => "768k",
+            AutoCompactWindow::K896 => "896k",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            AutoCompactWindow::K256 => "256K",
+            AutoCompactWindow::K512 => "512K",
+            AutoCompactWindow::K768 => "768K",
+            AutoCompactWindow::K896 => "896K",
+        }
+    }
+
+    pub fn env_value(self) -> &'static str {
+        match self {
+            AutoCompactWindow::K256 => "256000",
+            AutoCompactWindow::K512 => "512000",
+            AutoCompactWindow::K768 => "768000",
+            AutoCompactWindow::K896 => "896000",
+        }
+    }
+}
+
+impl std::fmt::Display for AutoCompactWindow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl std::str::FromStr for AutoCompactWindow {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "896k" | "896-k" | "896000" => Ok(AutoCompactWindow::K896),
+            "768k" | "768-k" | "768000" => Ok(AutoCompactWindow::K768),
+            "512k" | "512-k" | "512000" => Ok(AutoCompactWindow::K512),
+            "256k" | "256-k" | "256000" => Ok(AutoCompactWindow::K256),
+            _ => Err(anyhow!(
+                "Invalid auto-compact window '{}'. Use one of: 896k, 768k, 512k, 256k",
+                s
+            )),
+        }
+    }
+}
+
 /// Trait that all AI provider templates must implement
 pub trait Template {
     /// Get the template type identifier
@@ -19,6 +88,40 @@ pub trait Template {
 
     /// Create Claude settings for this template
     fn create_settings(&self, api_key: &str, scope: &SnapshotScope) -> ClaudeSettings;
+
+    /// Auto-compaction thresholds supported by this template. Empty means the
+    /// provider has no editable auto-compact option.
+    fn supported_auto_compact_windows(&self) -> &'static [AutoCompactWindow] {
+        &[]
+    }
+
+    /// Default auto-compaction threshold, when the provider supports it.
+    fn default_auto_compact_window(&self) -> Option<AutoCompactWindow> {
+        self.supported_auto_compact_windows().first().copied()
+    }
+
+    /// Create Claude settings using a selected auto-compaction threshold.
+    /// Templates that do not override this keep their existing behavior and
+    /// reject unsupported explicit choices.
+    fn create_settings_with_auto_compact(
+        &self,
+        api_key: &str,
+        scope: &SnapshotScope,
+        auto_compact_window: Option<AutoCompactWindow>,
+    ) -> Result<ClaudeSettings> {
+        if let Some(auto_compact_window) = auto_compact_window
+            && !self
+                .supported_auto_compact_windows()
+                .contains(&auto_compact_window)
+        {
+            return Err(anyhow!(
+                "{} does not support auto-compact window '{}'",
+                self.display_name(),
+                auto_compact_window
+            ));
+        }
+        Ok(self.create_settings(api_key, scope))
+    }
 
     /// Get display name for the template
     fn display_name(&self) -> &'static str;
@@ -69,6 +172,22 @@ pub trait Template {
             "This template does not support interactive creation"
         ))
     }
+}
+
+pub fn settings_use_1m_model(settings: &ClaudeSettings) -> bool {
+    settings
+        .model
+        .as_deref()
+        .is_some_and(|model| model.contains("[1m]"))
+        || settings.env.as_ref().is_some_and(|env| {
+            env.get("ANTHROPIC_MODEL")
+                .is_some_and(|model| model.contains("[1m]"))
+        })
+}
+
+pub fn supports_auto_compact_option(template: &dyn Template) -> bool {
+    !template.supported_auto_compact_windows().is_empty()
+        && settings_use_1m_model(&template.create_settings("sk-preview", &SnapshotScope::Common))
 }
 
 /// Type of AI provider template
@@ -422,6 +541,8 @@ pub fn get_template(template_type: &TemplateType) -> fn(&str, &SnapshotScope) ->
 
 // Import all template modules
 pub mod anyrouter;
+pub mod beeapi;
+pub mod day77;
 pub mod deepseek;
 pub mod duojie;
 pub mod fishtrip;
@@ -429,8 +550,6 @@ pub mod kat_coder;
 pub mod kimi; // Unified module for all Moonshot services
 pub mod longcat;
 pub mod minimax;
-pub mod beeapi;
-pub mod day77;
 pub mod openrouter;
 pub mod seed_code;
 pub mod zai;
@@ -438,6 +557,8 @@ pub mod zenmux;
 
 // Re-export for backward compatibility
 pub use anyrouter::*;
+pub use beeapi::*;
+pub use day77::*;
 pub use deepseek::*;
 pub use duojie::*;
 pub use fishtrip::*;
@@ -445,8 +566,6 @@ pub use kat_coder::*;
 pub use kimi::*; // Includes legacy k2 functions
 pub use longcat::*;
 pub use minimax::*;
-pub use beeapi::*;
-pub use day77::*;
 pub use openrouter::*;
 pub use seed_code::*;
 pub use zai::*;
