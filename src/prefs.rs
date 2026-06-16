@@ -215,6 +215,7 @@ impl Prefs {
     }
 
     /// Record everything from a completed apply in one go.
+    #[allow(clippy::too_many_arguments)]
     pub fn record_apply(
         &mut self,
         template_type: &TemplateType,

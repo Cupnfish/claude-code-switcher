@@ -140,7 +140,7 @@ impl ZaiTemplate {
             env.insert("ANTHROPIC_MODEL".to_string(), model_name.clone());
             env.insert(
                 "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
-                "glm-4.5-air".to_string(),
+                "glm-5.2".to_string(),
             );
             env.insert(
                 "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
