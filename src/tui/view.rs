@@ -11,6 +11,7 @@ use ratatui::{
 use crate::credentials::{ApiKeySource, mask_api_key};
 use crate::tui::app::{App, Mode};
 use crate::tui::input::TextInput;
+use crate::usage::{UsageReport, UsageStatus};
 
 const CURSOR: &str = "❯ ";
 const NONE_CURSOR: &str = "  ";
@@ -184,11 +185,15 @@ fn render_body(frame: &mut Frame, app: &App, area: Rect) {
         rows.push(option_row("Compact  ", label, cur == row_idx));
         row_idx += 1;
     }
+    if app.has_usage_row() {
+        rows.push(option_row("Usage    ", "refresh", cur == row_idx));
+        row_idx += 1;
+    }
 
     // Preview section
     rows.push(header("Preview"));
     let (model, base) = app.preview_model_and_base();
-    let preview_lines = vec![
+    let mut preview_lines = vec![
         Line::from(vec![
             Span::styled(" model : ", Style::default().fg(Color::DarkGray)),
             Span::raw(model),
@@ -204,6 +209,9 @@ fn render_body(frame: &mut Frame, app: &App, area: Rect) {
             ),
         ]),
     ];
+    if app.has_usage_row() {
+        preview_lines.push(usage_line(app.usage_status()));
+    }
     for pl in preview_lines {
         rows.push(RowLine {
             row: None,
@@ -253,8 +261,83 @@ fn option_row(label: &str, value: &str, is_cursor: bool) -> RowLine {
     RowLine { row: None, line }
 }
 
+fn usage_line(status: &UsageStatus) -> Line<'static> {
+    match status {
+        UsageStatus::Unsupported => Line::from(vec![
+            Span::styled(" usage: ", Style::default().fg(Color::DarkGray)),
+            Span::raw("not supported"),
+        ]),
+        UsageStatus::NoKey => Line::from(vec![
+            Span::styled(" usage: ", Style::default().fg(Color::DarkGray)),
+            Span::raw("select or add a key to query usage"),
+        ]),
+        UsageStatus::Loading { stale, spinner } => {
+            let mut spans = vec![
+                Span::styled(" usage: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("{spinner} loading"),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ];
+            if let Some(stale) = stale {
+                spans.push(Span::styled(
+                    "   cached: ",
+                    Style::default().fg(Color::DarkGray),
+                ));
+                spans.push(Span::raw(format_usage_report(stale, 100)));
+            }
+            Line::from(spans)
+        }
+        UsageStatus::Ready(report) => Line::from(vec![
+            Span::styled(" usage: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                format_usage_report(report, 112),
+                Style::default().fg(Color::Green),
+            ),
+        ]),
+        UsageStatus::Error { message, stale } => {
+            let mut spans = vec![
+                Span::styled(" usage: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("error: {}", truncate(message, 56)),
+                    Style::default().fg(Color::Red),
+                ),
+            ];
+            if let Some(stale) = stale {
+                spans.push(Span::styled(
+                    "   cached: ",
+                    Style::default().fg(Color::DarkGray),
+                ));
+                spans.push(Span::raw(format_usage_report(stale, 72)));
+            }
+            Line::from(spans)
+        }
+    }
+}
+
+fn format_usage_report(report: &UsageReport, max_chars: usize) -> String {
+    truncate(
+        &format!("{} {}", report.provider, report.summary),
+        max_chars,
+    )
+}
+
+fn truncate(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+    if max_chars <= 3 {
+        return ".".repeat(max_chars);
+    }
+    let mut out = value.chars().take(max_chars - 3).collect::<String>();
+    out.push_str("...");
+    out
+}
+
 fn render_help(frame: &mut Frame, area: Rect) {
-    let help = " ↑/↓ move · ←/→ change option · Enter select/new-key/apply · a apply · n new · d delete · r rename · ? help · Esc quit ";
+    let help = " ↑/↓ move · ←/→ change · u refresh usage · a apply · n new · d delete · r rename · ? help · Esc quit ";
     let p = Paragraph::new(Line::from(vec![Span::styled(
         help,
         Style::default().fg(Color::DarkGray),
@@ -381,6 +464,10 @@ fn help_lines() -> Vec<Line<'static>> {
         b("←/→", "change the focused option's value"),
         b("Enter", "on a key: select & apply · ➕: new · Apply: apply"),
         b("a", "apply now (selected key + current options)"),
+        b(
+            "u",
+            "refresh usage now (cached values stay visible while loading)",
+        ),
         b("n/d/r", "new / delete / rename key"),
         b("Esc/q", "quit without applying"),
         Line::from(Span::raw("")),

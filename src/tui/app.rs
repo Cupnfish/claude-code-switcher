@@ -5,6 +5,9 @@
 //! does not touch settings.json itself.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::collections::HashMap;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::time::{Duration, Instant};
 
 use crate::CredentialManager;
 use crate::credentials::{
@@ -16,6 +19,7 @@ use crate::templates::{
     AutoCompactWindow, TemplateType, get_template_instance_with_input, is_generic_target,
     supports_auto_compact_option, variant_options,
 };
+use crate::usage::{UsageReport, UsageRequest, UsageStatus, query_usage, supports_usage};
 
 use super::input::TextInput;
 
@@ -57,6 +61,25 @@ const SCOPES: &[SnapshotScope] = &[
     SnapshotScope::Env,
     SnapshotScope::All,
 ];
+const USAGE_CACHE_TTL: Duration = Duration::from_secs(60);
+const SPINNER_FRAMES: [char; 4] = ['-', '\\', '|', '/'];
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct UsageCacheKey {
+    template_type: TemplateType,
+    api_key: String,
+    base_url: Option<String>,
+}
+
+struct UsageCacheEntry {
+    report: UsageReport,
+    fetched_at: Instant,
+}
+
+struct UsageInFlight {
+    key: UsageCacheKey,
+    receiver: Receiver<Result<UsageReport, String>>,
+}
 
 fn supported_auto_compact_windows_for(
     template_type: &TemplateType,
@@ -80,6 +103,7 @@ enum Row {
     CoAuthor,
     Variant,
     AutoCompact,
+    UsageRefresh,
     Apply,
 }
 
@@ -101,6 +125,12 @@ pub struct App {
     has_variant_row: bool,
     auto_compact_windows: Vec<AutoCompactWindow>,
     auto_compact_idx: usize,
+
+    usage_cache: HashMap<UsageCacheKey, UsageCacheEntry>,
+    usage_in_flight: Option<UsageInFlight>,
+    usage_status: UsageStatus,
+    usage_status_key: Option<UsageCacheKey>,
+    spinner_idx: usize,
 
     pub mode: Mode,
 }
@@ -191,7 +221,7 @@ impl App {
             0
         });
 
-        Ok(Self {
+        let mut app = Self {
             template_type,
             target,
             display_name,
@@ -207,8 +237,15 @@ impl App {
             has_variant_row,
             auto_compact_windows,
             auto_compact_idx,
+            usage_cache: HashMap::new(),
+            usage_in_flight: None,
+            usage_status: UsageStatus::Unsupported,
+            usage_status_key: None,
+            spinner_idx: 0,
             mode: Mode::Normal,
-        })
+        };
+        app.refresh_usage(false);
+        Ok(app)
     }
 
     // ── row model ────────────────────────────────────────────────────────────
@@ -219,6 +256,7 @@ impl App {
     fn n_options(&self) -> usize {
         3 + if self.has_variant_row { 1 } else { 0 }
             + if self.has_auto_compact_row() { 1 } else { 0 }
+            + if self.has_usage_row() { 1 } else { 0 }
     }
     fn total_rows(&self) -> usize {
         self.n_keys() + 1 + self.n_options() + 1
@@ -230,23 +268,45 @@ impl App {
     fn row_at(&self, cursor: usize) -> Row {
         let nk = self.n_keys();
         if cursor < nk {
-            Row::Key(cursor)
-        } else if cursor == nk {
-            Row::NewKey
-        } else if cursor == self.apply_index() {
-            Row::Apply
-        } else {
-            // option rows start after NewKey
-            let o = cursor - (nk + 1);
-            match o {
-                0 => Row::Effort,
-                1 => Row::Scope,
-                2 => Row::CoAuthor,
-                3 if self.has_variant_row => Row::Variant,
-                3 | 4 if self.has_auto_compact_row() => Row::AutoCompact,
-                _ => Row::Apply,
-            }
+            return Row::Key(cursor);
         }
+        if cursor == nk {
+            return Row::NewKey;
+        }
+        if cursor == self.apply_index() {
+            return Row::Apply;
+        }
+
+        // option rows start after NewKey
+        let mut o = cursor - (nk + 1);
+        if o == 0 {
+            return Row::Effort;
+        }
+        o -= 1;
+        if o == 0 {
+            return Row::Scope;
+        }
+        o -= 1;
+        if o == 0 {
+            return Row::CoAuthor;
+        }
+        o -= 1;
+        if self.has_variant_row {
+            if o == 0 {
+                return Row::Variant;
+            }
+            o -= 1;
+        }
+        if self.has_auto_compact_row() {
+            if o == 0 {
+                return Row::AutoCompact;
+            }
+            o -= 1;
+        }
+        if self.has_usage_row() && o == 0 {
+            return Row::UsageRefresh;
+        }
+        Row::Apply
     }
 
     // ── accessors for rendering ──────────────────────────────────────────────
@@ -293,6 +353,12 @@ impl App {
         }
         Some(self.auto_compact_windows[self.auto_compact_idx])
     }
+    pub fn has_usage_row(&self) -> bool {
+        supports_usage(&self.template_type)
+    }
+    pub fn usage_status(&self) -> &UsageStatus {
+        &self.usage_status
+    }
 
     /// Build a template instance reflecting the current variant choice (for
     /// previewing model / base URL).
@@ -338,6 +404,158 @@ impl App {
         }
     }
 
+    fn selected_usage_key(&self) -> Option<UsageCacheKey> {
+        if !supports_usage(&self.template_type) {
+            return None;
+        }
+        let api_key = self
+            .selected_key
+            .and_then(|i| self.sources.get(i))
+            .map(|s| s.api_key().to_string())?;
+        let (_, base_url) = self.preview_model_and_base();
+        Some(UsageCacheKey {
+            template_type: self.template_type.clone(),
+            api_key,
+            base_url: if base_url == "(none)" {
+                None
+            } else {
+                Some(base_url)
+            },
+        })
+    }
+
+    pub fn tick(&mut self) {
+        self.spinner_idx = (self.spinner_idx + 1) % SPINNER_FRAMES.len();
+        self.drain_usage_result();
+        if self
+            .selected_usage_key()
+            .as_ref()
+            .is_some_and(|key| self.usage_status_key.as_ref() != Some(key))
+        {
+            self.refresh_usage(false);
+            return;
+        }
+        if let Some(key) = self.selected_usage_key() {
+            let expired = self
+                .usage_cache
+                .get(&key)
+                .is_some_and(|entry| entry.fetched_at.elapsed() >= USAGE_CACHE_TTL);
+            let already_loading = self.usage_in_flight.as_ref().is_some_and(|p| p.key == key);
+            if expired && !already_loading {
+                self.refresh_usage(false);
+            } else if matches!(self.usage_status, UsageStatus::Loading { .. }) {
+                self.update_loading_spinner();
+            }
+        }
+    }
+
+    fn drain_usage_result(&mut self) {
+        let Some(in_flight) = self.usage_in_flight.as_ref() else {
+            return;
+        };
+        match in_flight.receiver.try_recv() {
+            Ok(Ok(report)) => {
+                let key = in_flight.key.clone();
+                self.usage_cache.insert(
+                    key.clone(),
+                    UsageCacheEntry {
+                        report: report.clone(),
+                        fetched_at: Instant::now(),
+                    },
+                );
+                self.usage_in_flight = None;
+                if self.selected_usage_key().as_ref() == Some(&key) {
+                    self.usage_status_key = Some(key);
+                    self.usage_status = UsageStatus::Ready(report);
+                }
+            }
+            Ok(Err(message)) => {
+                let key = in_flight.key.clone();
+                let stale = self.usage_cache.get(&key).map(|entry| entry.report.clone());
+                self.usage_in_flight = None;
+                if self.selected_usage_key().as_ref() == Some(&key) {
+                    self.usage_status_key = Some(key);
+                    self.usage_status = UsageStatus::Error { message, stale };
+                }
+            }
+            Err(TryRecvError::Empty) => self.update_loading_spinner(),
+            Err(TryRecvError::Disconnected) => {
+                let key = in_flight.key.clone();
+                let stale = self.usage_cache.get(&key).map(|entry| entry.report.clone());
+                self.usage_in_flight = None;
+                if self.selected_usage_key().as_ref() == Some(&key) {
+                    self.usage_status_key = Some(key);
+                    self.usage_status = UsageStatus::Error {
+                        message: "usage query worker stopped".to_string(),
+                        stale,
+                    };
+                }
+            }
+        }
+    }
+
+    fn refresh_usage(&mut self, force: bool) {
+        self.drain_usage_result();
+        if !supports_usage(&self.template_type) {
+            self.usage_status_key = None;
+            self.usage_status = UsageStatus::Unsupported;
+            return;
+        }
+        let Some(key) = self.selected_usage_key() else {
+            self.usage_status_key = None;
+            self.usage_status = UsageStatus::NoKey;
+            self.usage_in_flight = None;
+            return;
+        };
+
+        if !force
+            && let Some(entry) = self.usage_cache.get(&key)
+            && entry.fetched_at.elapsed() < USAGE_CACHE_TTL
+        {
+            self.usage_status_key = Some(key);
+            self.usage_status = UsageStatus::Ready(entry.report.clone());
+            return;
+        }
+
+        if self.usage_in_flight.as_ref().is_some_and(|p| p.key == key) {
+            self.update_loading_spinner();
+            return;
+        }
+
+        let stale = self.usage_cache.get(&key).map(|entry| entry.report.clone());
+        self.start_usage_query(key, stale);
+    }
+
+    fn start_usage_query(&mut self, key: UsageCacheKey, stale: Option<UsageReport>) {
+        let request = UsageRequest {
+            template_type: key.template_type.clone(),
+            api_key: key.api_key.clone(),
+            anthropic_base_url: key.base_url.clone(),
+        };
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let result = query_usage(&request).map_err(|e| e.to_string());
+            let _ = sender.send(result);
+        });
+        self.usage_status_key = Some(key.clone());
+        self.usage_status = UsageStatus::Loading {
+            stale,
+            spinner: SPINNER_FRAMES[self.spinner_idx],
+        };
+        self.usage_in_flight = Some(UsageInFlight { key, receiver });
+    }
+
+    fn update_loading_spinner(&mut self) {
+        if let UsageStatus::Loading { stale, spinner } = &mut self.usage_status {
+            *spinner = SPINNER_FRAMES[self.spinner_idx];
+            if stale.is_none()
+                && let Some(key) = &self.usage_status_key
+            {
+                *stale = self.usage_cache.get(key).map(|entry| entry.report.clone());
+            }
+        }
+    }
+
     // ── event handling ───────────────────────────────────────────────────────
 
     pub fn handle_event(&mut self, key: KeyEvent) -> Outcome {
@@ -369,6 +587,7 @@ impl App {
             KeyCode::Enter => match self.row_at(self.cursor) {
                 Row::Key(idx) => {
                     self.selected_key = Some(idx);
+                    self.refresh_usage(false);
                     return self.build_apply();
                 }
                 Row::NewKey => self.mode = Mode::InputNewKey(TextInput::empty()),
@@ -377,12 +596,14 @@ impl App {
                 Row::CoAuthor => self.co_author = !self.co_author,
                 Row::Variant => self.cycle_variant(1),
                 Row::AutoCompact => self.cycle_auto_compact(1),
+                Row::UsageRefresh => self.refresh_usage(true),
                 Row::Apply => return self.build_apply(),
             },
             KeyCode::Char('a') => return self.build_apply(),
             KeyCode::Char('n') => self.mode = Mode::InputNewKey(TextInput::empty()),
             KeyCode::Char('d') => self.try_delete(),
             KeyCode::Char('r') => self.try_rename(),
+            KeyCode::Char('u') => self.refresh_usage(true),
             KeyCode::Char('?') => self.mode = Mode::Help,
             KeyCode::Esc | KeyCode::Char('q') => return Outcome::Quit,
             _ => {}
@@ -407,6 +628,7 @@ impl App {
         // live-select the key under the cursor
         if let Row::Key(idx) = self.row_at(self.cursor) {
             self.selected_key = Some(idx);
+            self.refresh_usage(false);
         }
     }
 
@@ -417,6 +639,7 @@ impl App {
             Row::CoAuthor => self.co_author = !self.co_author,
             Row::Variant => self.cycle_variant(dir),
             Row::AutoCompact => self.cycle_auto_compact(dir),
+            Row::UsageRefresh => self.refresh_usage(true),
             _ => {}
         }
     }
@@ -436,6 +659,7 @@ impl App {
         }
         self.variant_idx = ((self.variant_idx as i32 + dir).rem_euclid(n)) as usize;
         self.refresh_auto_compact_windows();
+        self.refresh_usage(false);
     }
     fn refresh_auto_compact_windows(&mut self) {
         let current = self.auto_compact_window();
@@ -676,6 +900,7 @@ mod snapshot_tests {
     use super::*;
     use crate::credentials::CredentialData;
     use crate::templates::TemplateType;
+    use crate::usage::{UsageReport, UsageStatus};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::{Terminal, backend::TestBackend, layout::Position};
 
@@ -725,7 +950,27 @@ mod snapshot_tests {
                 AutoCompactWindow::K256,
             ],
             auto_compact_idx: 0,
+            usage_cache: HashMap::new(),
+            usage_in_flight: None,
+            usage_status: UsageStatus::Loading {
+                stale: None,
+                spinner: '-',
+            },
+            usage_status_key: None,
+            spinner_idx: 0,
             mode: Mode::Normal,
+        }
+    }
+
+    fn with_usage(mut app: App, status: UsageStatus) -> App {
+        app.usage_status = status;
+        app
+    }
+
+    fn usage_report(provider: &str, summary: &str) -> UsageReport {
+        UsageReport {
+            provider: provider.to_string(),
+            summary: summary.to_string(),
         }
     }
 
@@ -802,11 +1047,48 @@ mod snapshot_tests {
         app.sources.clear();
         app.selected_key = None;
         app.cursor = 0;
+        app.refresh_usage(false);
         banner("7. NO KEYS (cursor on ➕)", &render(&app, 76, 22));
 
         // 8. narrow terminal
         let app = base_app();
         banner("8. NARROW 52x18", &render(&app, 52, 18));
+
+        // 9. usage loading with stale cache
+        let app = with_usage(
+            base_app(),
+            UsageStatus::Loading {
+                stale: Some(usage_report(
+                    "ZHIPU",
+                    "5h 42%@18:00 | wk 150/1000 15%@06-22 00:00 | MCP 2/30 7%",
+                )),
+                spinner: '|',
+            },
+        );
+        banner("9. USAGE LOADING", &render(&app, 76, 22));
+
+        // 10. usage ready
+        let app = with_usage(
+            base_app(),
+            UsageStatus::Ready(usage_report(
+                "ZHIPU",
+                "5h 42%@18:00 | wk 150/1000 15%@06-22 00:00 | MCP 2/30 7%",
+            )),
+        );
+        banner("10. USAGE READY", &render(&app, 76, 22));
+
+        // 11. usage error with stale data
+        let app = with_usage(
+            base_app(),
+            UsageStatus::Error {
+                message: "request failed".to_string(),
+                stale: Some(usage_report(
+                    "DeepSeek",
+                    "available | CNY 12.34 (grant 2.00, top-up 10.34)",
+                )),
+            },
+        );
+        banner("11. USAGE ERROR", &render(&app, 76, 22));
     }
 
     #[test]
@@ -843,5 +1125,88 @@ mod snapshot_tests {
         assert_eq!(app.preview_model_and_base().0, "deepseek-v4-pro[1m]");
         assert!(!app.has_auto_compact_row());
         assert_eq!(app.auto_compact_window(), None);
+    }
+
+    #[test]
+    fn usage_snapshot_states_cover_loading_ready_and_stale_error() {
+        let loading = render(
+            &with_usage(
+                base_app(),
+                UsageStatus::Loading {
+                    stale: Some(usage_report(
+                        "ZHIPU",
+                        "5h 42%@18:00 | wk 150/1000 15%@06-22 00:00 | MCP 2/30 7%",
+                    )),
+                    spinner: '/',
+                },
+            ),
+            76,
+            22,
+        );
+        assert!(loading.contains("usage: / loading"));
+        assert!(loading.contains("cached: ZHIPU 5h 42%"));
+        assert!(!loading.contains("24h"));
+
+        let ready = render(
+            &with_usage(
+                base_app(),
+                UsageStatus::Ready(usage_report("DeepSeek", "available | CNY 12.34")),
+            ),
+            76,
+            22,
+        );
+        assert!(ready.contains("usage: DeepSeek available | CNY 12.34"));
+
+        let error = render(
+            &with_usage(
+                base_app(),
+                UsageStatus::Error {
+                    message: "request failed".to_string(),
+                    stale: Some(usage_report("DeepSeek", "available | CNY 12.34")),
+                },
+            ),
+            76,
+            22,
+        );
+        assert!(error.contains("usage: error: request failed"));
+        assert!(error.contains("cached: DeepSeek available | CNY 12.34"));
+    }
+
+    #[test]
+    fn usage_loading_state_keeps_stale_cache_visible() {
+        let mut app = base_app();
+        let key = app.selected_usage_key().unwrap();
+        app.usage_cache.insert(
+            key.clone(),
+            UsageCacheEntry {
+                report: UsageReport {
+                    provider: "ZHIPU".to_string(),
+                    summary: "5h 42%@18:00".to_string(),
+                },
+                fetched_at: Instant::now() - USAGE_CACHE_TTL - Duration::from_secs(1),
+            },
+        );
+        app.usage_status_key = Some(key.clone());
+        app.usage_status = UsageStatus::Loading {
+            stale: None,
+            spinner: '-',
+        };
+        let (_sender, receiver) = mpsc::channel();
+        app.usage_in_flight = Some(UsageInFlight {
+            key: key.clone(),
+            receiver,
+        });
+
+        app.tick();
+
+        match app.usage_status() {
+            UsageStatus::Loading { stale, .. } => {
+                assert_eq!(
+                    stale.as_ref().map(|report| report.summary.as_str()),
+                    Some("5h 42%@18:00")
+                );
+            }
+            other => panic!("expected loading usage status, got {other:?}"),
+        }
     }
 }

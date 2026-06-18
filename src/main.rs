@@ -16,6 +16,7 @@ pub mod settings;
 pub mod snapshots;
 pub mod templates;
 pub mod tui;
+pub mod usage;
 pub mod utils;
 
 // Core traits for abstraction

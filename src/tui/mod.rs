@@ -16,6 +16,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
+use std::time::Duration;
 
 use crate::prefs::Prefs;
 use crate::templates::TemplateType;
@@ -43,7 +44,15 @@ pub fn run_apply_tui(
 
     let result = (|| -> Result<Option<ApplySelection>> {
         loop {
+            app.tick();
             terminal.draw(|f| view::render(f, &app))?;
+            let ready = match event::poll(Duration::from_millis(200)) {
+                Ok(ready) => ready,
+                Err(_) => break Ok(None),
+            };
+            if !ready {
+                continue;
+            }
             let ev = match event::read() {
                 Ok(e) => e,
                 Err(_) => break Ok(None),

@@ -191,7 +191,7 @@ pub fn supports_auto_compact_option(template: &dyn Template) -> bool {
 }
 
 /// Type of AI provider template
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Hash)]
 pub enum TemplateType {
     DeepSeek,
     Zai,
