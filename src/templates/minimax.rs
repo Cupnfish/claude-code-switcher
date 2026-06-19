@@ -92,25 +92,7 @@ impl Template for MiniMaxTemplate {
             settings.model = Some("MiniMax-M2.5".to_string());
 
             settings.permissions = Some(Permissions {
-                allow: Some(vec![
-                    "Bash".to_string(),
-                    "Read".to_string(),
-                    "Write".to_string(),
-                    "Edit".to_string(),
-                    "MultiEdit".to_string(),
-                    "Glob".to_string(),
-                    "Grep".to_string(),
-                    "WebFetch".to_string(),
-                    "Workflow".to_string(),
-                    "Agent".to_string(),
-                    "TaskCreate".to_string(),
-                    "TaskUpdate".to_string(),
-                    "TaskList".to_string(),
-                    "TaskGet".to_string(),
-                    "CronCreate".to_string(),
-                    "CronList".to_string(),
-                    "CronDelete".to_string(),
-                ]),
+                allow: Some(crate::templates::default_allow_list()),
                 ask: None,
                 deny: Some(vec!["WebSearch".to_string()]),
                 additional_directories: None,

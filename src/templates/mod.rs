@@ -9,6 +9,85 @@ use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Default `permissions.allow` list shared by every built-in template.
+///
+/// `PowerShell` is only emitted on Windows builds, matching the shell that
+/// Claude Code invokes there.
+pub fn default_allow_list() -> Vec<String> {
+    let mut list = vec![
+        "Bash".to_string(),
+        "Read".to_string(),
+        "Write".to_string(),
+        "Edit".to_string(),
+        "MultiEdit".to_string(),
+        "Glob".to_string(),
+        "Grep".to_string(),
+        "WebFetch".to_string(),
+        "Workflow".to_string(),
+        "Agent".to_string(),
+        "TaskCreate".to_string(),
+        "TaskUpdate".to_string(),
+        "TaskList".to_string(),
+        "TaskGet".to_string(),
+        "CronCreate".to_string(),
+        "CronList".to_string(),
+        "CronDelete".to_string(),
+        "TodoWrite".to_string(),
+        "NotebookEdit".to_string(),
+    ];
+    #[cfg(target_os = "windows")]
+    list.push("PowerShell".to_string());
+    list
+}
+
+#[cfg(test)]
+mod default_allow_list_tests {
+    use super::*;
+
+    #[test]
+    fn includes_core_and_new_tools() {
+        let list = default_allow_list();
+        for tool in [
+            "Bash",
+            "Read",
+            "Write",
+            "Edit",
+            "MultiEdit",
+            "Glob",
+            "Grep",
+            "WebFetch",
+            "Workflow",
+            "Agent",
+            "TaskCreate",
+            "TaskUpdate",
+            "TaskList",
+            "TaskGet",
+            "CronCreate",
+            "CronList",
+            "CronDelete",
+            "TodoWrite",
+            "NotebookEdit",
+        ] {
+            assert!(list.contains(&tool.to_string()), "missing {tool}");
+        }
+    }
+
+    #[test]
+    fn powershell_only_on_windows() {
+        let list = default_allow_list();
+        #[cfg(target_os = "windows")]
+        {
+            assert!(list.contains(&"PowerShell".to_string()));
+            assert_eq!(list.len(), 20);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            assert!(!list.contains(&"PowerShell".to_string()));
+            assert_eq!(list.len(), 19);
+        }
+    }
+}
+
 /// Selectable auto-compaction threshold for providers that run a 1M context
 /// model and should compact before the full window is exhausted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
