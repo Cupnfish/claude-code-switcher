@@ -72,7 +72,6 @@ impl Template for FishtripTemplate {
                 "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
                 "claude-opus-4-8[1m]".to_string(),
             );
-            env.insert("CLAUDE_CODE_EFFORT_LEVEL".to_string(), "max".to_string());
             env.insert("API_TIMEOUT_MS".to_string(), "600000".to_string());
             env.insert(
                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),

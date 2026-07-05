@@ -772,7 +772,13 @@ impl App {
 
     fn handle_input_newkey(&mut self, key: KeyEvent, mut input: TextInput) -> Outcome {
         match key.code {
-            KeyCode::Esc => self.mode = Mode::Normal,
+            // Esc / Enter terminate input mode. They must return early so the
+            // "keep editing" restore below doesn't re-enter the input mode —
+            // that was the bug where the create-key page could never be left.
+            KeyCode::Esc => {
+                self.mode = Mode::Normal;
+                return Outcome::Continue;
+            }
             KeyCode::Enter => {
                 let value = input.value().trim().to_string();
                 if value.is_empty() {
@@ -799,6 +805,7 @@ impl App {
                     },
                     Err(e) => self.mode = Mode::Message(format!("Credential store error: {e}")),
                 }
+                return Outcome::Continue;
             }
             KeyCode::Backspace => input.backspace(),
             KeyCode::Delete => input.delete(),
@@ -809,17 +816,18 @@ impl App {
             KeyCode::Char(c) => input.insert(c),
             _ => {}
         }
-        // keep editing unless a terminal mode was set above
-        if matches!(self.mode, Mode::Normal) {
-            // entered a branch that didn't reassign (plain editing) — restore input
-            self.mode = Mode::InputNewKey(input);
-        }
+        // Editing keys: stay in input mode with the (possibly modified) input.
+        self.mode = Mode::InputNewKey(input);
         Outcome::Continue
     }
 
     fn handle_input_rename(&mut self, key: KeyEvent, idx: usize, mut input: TextInput) -> Outcome {
         match key.code {
-            KeyCode::Esc => self.mode = Mode::Normal,
+            // Esc / Enter terminate input mode (see handle_input_newkey).
+            KeyCode::Esc => {
+                self.mode = Mode::Normal;
+                return Outcome::Continue;
+            }
             KeyCode::Enter => {
                 let new_name = input.value().trim().to_string();
                 if let Some(ApiKeySource::Saved { credential }) = self.sources.get(idx).cloned() {
@@ -844,6 +852,7 @@ impl App {
                 }
                 self.mode = Mode::Normal;
                 self.reload_sources();
+                return Outcome::Continue;
             }
             KeyCode::Backspace => input.backspace(),
             KeyCode::Delete => input.delete(),
@@ -854,9 +863,8 @@ impl App {
             KeyCode::Char(c) => input.insert(c),
             _ => {}
         }
-        if matches!(self.mode, Mode::Normal) {
-            self.mode = Mode::InputRename { idx, input };
-        }
+        // Editing keys: stay in input mode with the (possibly modified) input.
+        self.mode = Mode::InputRename { idx, input };
         Outcome::Continue
     }
 
@@ -1089,6 +1097,74 @@ mod snapshot_tests {
             },
         );
         banner("11. USAGE ERROR", &render(&app, 76, 22));
+    }
+
+    #[test]
+    fn newkey_input_can_be_exited_and_normal_keys_resume() {
+        let mut app = base_app();
+
+        // 'n' opens the create-key input.
+        app.handle_event(key(KeyCode::Char('n')));
+        assert!(
+            matches!(app.mode, Mode::InputNewKey(_)),
+            "'n' should open the new-key input"
+        );
+
+        // Typing is captured into the field.
+        for c in "sk-test".chars() {
+            app.handle_event(key(KeyCode::Char(c)));
+        }
+        match &app.mode {
+            Mode::InputNewKey(input) => assert_eq!(input.value(), "sk-test"),
+            _ => panic!("expected to still be in new-key input while typing"),
+        }
+
+        // Esc must leave the input page. Before the fix the page stayed open
+        // (the "keep editing" guard re-entered InputNewKey) and every key was
+        // swallowed as text — the user could neither exit nor navigate.
+        app.handle_event(key(KeyCode::Esc));
+        assert!(
+            matches!(app.mode, Mode::Normal),
+            "Esc must exit the new-key input back to Normal"
+        );
+
+        // In Normal mode, '?' opens Help instead of being inserted as text.
+        app.handle_event(key(KeyCode::Char('?')));
+        assert!(
+            matches!(app.mode, Mode::Help),
+            "post-Esc keys must act on Normal mode, not be typed"
+        );
+    }
+
+    #[test]
+    fn newkey_input_render_shows_typed_text() {
+        let mut app = base_app();
+        app.handle_event(key(KeyCode::Char('n')));
+        for c in "sk-abcd-1234".chars() {
+            app.handle_event(key(KeyCode::Char(c)));
+        }
+        let screen = render(&app, 70, 16);
+        banner("NEW-KEY INPUT (typed sk-abcd-1234)", &screen);
+        assert!(screen.contains("Create new API key"));
+        assert!(screen.contains("sk-abcd-1234"));
+        assert!(screen.contains("Esc"));
+    }
+
+    #[test]
+    fn rename_input_esc_exits_to_normal() {
+        let mut app = base_app();
+        app.cursor = 0; // first row is a saved credential
+        app.handle_event(key(KeyCode::Char('r')));
+        assert!(
+            matches!(app.mode, Mode::InputRename { .. }),
+            "'r' on a saved key should open rename input"
+        );
+        // Same guard bug used to trap rename too — Esc must leave it.
+        app.handle_event(key(KeyCode::Esc));
+        assert!(
+            matches!(app.mode, Mode::Normal),
+            "Esc must exit rename input back to Normal"
+        );
     }
 
     #[test]

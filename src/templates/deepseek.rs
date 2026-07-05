@@ -41,6 +41,7 @@ impl Template for DeepSeekTemplate {
 
         if matches!(scope, SnapshotScope::Common | SnapshotScope::All) {
             settings.model = Some("deepseek-v4-pro[1m]".to_string());
+            settings.effort_level = Some("max".to_string());
 
             settings.permissions = Some(Permissions {
                 allow: Some(crate::templates::default_allow_list()),
@@ -84,7 +85,6 @@ impl Template for DeepSeekTemplate {
                 "CLAUDE_CODE_SUBAGENT_MODEL".to_string(),
                 "deepseek-v4-pro[1m]".to_string(),
             );
-            env.insert("CLAUDE_CODE_EFFORT_LEVEL".to_string(), "max".to_string());
             env.insert(
                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),
                 "1".to_string(),
