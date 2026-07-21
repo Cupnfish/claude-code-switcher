@@ -23,7 +23,8 @@ pub enum Commands {
     Apply {
         /// Snapshot name or template type
         /// (deepseek, glm, k2, k2-thinking, kat-coder, kimi, longcat, fishtrip,
-        /// minimax, seed-code, zenmux, duojie, anyrouter, openrouter, beeapi, day77)
+        /// minimax, seed-code, zenmux, duojie, anyrouter, openrouter, beeapi, day77,
+        /// qianwen)
         target: String,
 
         /// What to include (default: common). env = only env vars; common =

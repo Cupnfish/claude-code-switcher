@@ -286,6 +286,7 @@ pub enum TemplateType {
     OpenRouter,
     BeeApi,
     Day77,
+    Qianwen,
 }
 
 impl<'de> Deserialize<'de> for TemplateType {
@@ -313,6 +314,7 @@ impl<'de> Deserialize<'de> for TemplateType {
             "OpenRouter" => Ok(TemplateType::OpenRouter),
             "BeeApi" => Ok(TemplateType::BeeApi),
             "Day77" => Ok(TemplateType::Day77),
+            "Qianwen" => Ok(TemplateType::Qianwen),
             _ => Err(serde::de::Error::custom(format!(
                 "unknown template type: {}",
                 s
@@ -357,8 +359,12 @@ impl std::str::FromStr for TemplateType {
             "openrouter" | "or" => Ok(TemplateType::OpenRouter),
             "beeapi" | "bee" => Ok(TemplateType::BeeApi),
             "day77" => Ok(TemplateType::Day77),
+            "qianwen" | "qwen" | "qw" | "qwen-token-plan" | "qianwen-token-plan"
+            | "qwen-tp" | "qwen-payg" | "qianwen-payg" | "dashscope" => {
+                Ok(TemplateType::Qianwen)
+            }
             _ => Err(anyhow!(
-                "Unknown template: {}. Available templates: deepseek, glm, k2, k2-thinking, kat-coder, kimi, longcat, fishtrip, fish, minimax, seed-code, zenmux, duojie, anyrouter, openrouter, beeapi, day77",
+                "Unknown template: {}. Available templates: deepseek, glm, k2, k2-thinking, kat-coder, kimi, longcat, fishtrip, fish, minimax, seed-code, zenmux, duojie, anyrouter, openrouter, beeapi, day77, qianwen",
                 s
             )),
         }
@@ -382,6 +388,7 @@ impl std::fmt::Display for TemplateType {
             TemplateType::OpenRouter => write!(f, "openrouter"),
             TemplateType::BeeApi => write!(f, "beeapi"),
             TemplateType::Day77 => write!(f, "day77"),
+            TemplateType::Qianwen => write!(f, "qianwen"),
         }
     }
 }
@@ -408,6 +415,7 @@ pub fn get_all_templates() -> Vec<TemplateType> {
         TemplateType::OpenRouter,
         TemplateType::BeeApi,
         TemplateType::Day77,
+        TemplateType::Qianwen,
     ]
 }
 
@@ -483,6 +491,15 @@ pub fn get_template_instance_with_input(
         )),
         TemplateType::BeeApi => Box::new(beeapi::BeeApiTemplate),
         TemplateType::Day77 => Box::new(day77::Day77Template),
+        TemplateType::Qianwen => {
+            // Specific plan requested via alias; default to Token Plan.
+            match input.to_lowercase().as_str() {
+                "qwen-payg" | "qianwen-payg" | "dashscope" => {
+                    Box::new(qianwen::QianwenTemplate::pay_as_you_go())
+                }
+                _ => Box::new(qianwen::QianwenTemplate::token_plan()),
+            }
+        }
     }
 }
 
@@ -510,6 +527,7 @@ pub fn resolve_template_cli(
         TemplateType::Kimi => "Use 'k2', 'k2-thinking', or 'moonshot'",
         TemplateType::AnyRouter => "Use 'anyr-china' or 'anyr-fallback'",
         TemplateType::OpenRouter => "Specify a model directly or use interactive mode",
+        TemplateType::Qianwen => "Use 'qwen-token-plan' or 'qwen-payg'",
         _ => "Use a specific variant name",
     };
 
@@ -545,6 +563,9 @@ pub fn resolve_template_interactive(
         TemplateType::OpenRouter => Ok(Box::new(
             openrouter::OpenRouterTemplate::create_with_model_selection()?,
         )),
+        TemplateType::Qianwen => Ok(Box::new(
+            qianwen::QianwenTemplate::create_interactively()?,
+        )),
         _ => Ok(initial),
     }
 }
@@ -566,6 +587,9 @@ pub fn is_generic_target(target: &str) -> bool {
             | "ar"
             | "openrouter"
             | "or"
+            | "qianwen"
+            | "qwen"
+            | "qw"
     )
 }
 
@@ -592,6 +616,10 @@ pub fn variant_options(template_type: &TemplateType) -> Vec<(&'static str, &'sta
             ("minimax", "MiniMax China"),
             ("minimax-international", "MiniMax International"),
         ],
+        TemplateType::Qianwen => vec![
+            ("qwen-token-plan", "千问 AI 平台 - Token Plan"),
+            ("qwen-payg", "千问 AI 平台 - 按量计费"),
+        ],
         // OpenRouter is model-based (handled by create_with_model_selection);
         // Day77 and the rest have no interactive variants.
         _ => vec![],
@@ -615,6 +643,7 @@ pub fn get_template(template_type: &TemplateType) -> fn(&str, &SnapshotScope) ->
         TemplateType::OpenRouter => create_openrouter_template,
         TemplateType::BeeApi => create_beeapi_template,
         TemplateType::Day77 => create_day77_template,
+        TemplateType::Qianwen => create_qianwen_template,
     }
 }
 
@@ -633,6 +662,7 @@ pub mod openrouter;
 pub mod seed_code;
 pub mod zai;
 pub mod zenmux;
+pub mod qianwen;
 
 // Re-export for backward compatibility
 pub use anyrouter::*;
@@ -649,3 +679,4 @@ pub use openrouter::*;
 pub use seed_code::*;
 pub use zai::*;
 pub use zenmux::*;
+pub use qianwen::*;
