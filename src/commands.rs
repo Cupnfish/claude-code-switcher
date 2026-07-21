@@ -22,6 +22,7 @@ use std::path::PathBuf;
 fn get_common_env_vars() -> HashMap<String, String> {
     let mut env = HashMap::new();
     env.insert("ENABLE_TOOL_SEARCH".to_string(), "true".to_string());
+    env.insert("CLAUDE_CODE_NO_FLICKER".to_string(), "1".to_string());
     env
 }
 
