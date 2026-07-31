@@ -5,7 +5,7 @@
 //!   flagship `qwen3.8-max-preview` model with thinking always on and a
 //!   983616-token context window.
 //! - [`QianwenPlan::PayAsYouGo`] — pay-as-you-go via the dashscope endpoint,
-//!   `qwen3.7-max` model.
+//!   `qwen3.8-max-preview` model.
 
 use crate::{
     settings::{ClaudeSettings, Permissions},
@@ -46,11 +46,11 @@ impl QianwenPlan {
     }
 
     /// Primary model id for this plan.
+    ///
+    /// Both plans currently target the flagship `qwen3.8-max-preview` model;
+    /// the plans differ only in billing endpoint and Token-Plan specifics.
     pub fn primary_model(&self) -> &'static str {
-        match self {
-            QianwenPlan::TokenPlan => "qwen3.8-max-preview",
-            QianwenPlan::PayAsYouGo => "qwen3.7-max",
-        }
+        "qwen3.8-max-preview"
     }
 
     pub fn display_name(&self) -> &'static str {
@@ -65,7 +65,7 @@ impl QianwenPlan {
             QianwenPlan::TokenPlan => {
                 "Qianwen Token Plan - qwen3.8-max-preview, 983616 context, thinking always on"
             }
-            QianwenPlan::PayAsYouGo => "Qianwen pay-as-you-go (dashscope) - qwen3.7-max",
+            QianwenPlan::PayAsYouGo => "Qianwen pay-as-you-go (dashscope) - qwen3.8-max-preview",
         }
     }
 }
@@ -162,7 +162,7 @@ impl Template for QianwenTemplate {
             ),
             (
                 "千问 AI 平台 - 按量计费",
-                "dashscope pay-as-you-go, qwen3.7-max",
+                "dashscope pay-as-you-go, qwen3.8-max-preview",
             ),
         ];
 
@@ -211,7 +211,7 @@ impl Template for QianwenTemplate {
             env.insert("ANTHROPIC_MODEL".to_string(), model_name.to_string());
             env.insert(
                 "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
-                "qwen3.6-flash".to_string(),
+                model_name.to_string(),
             );
             env.insert(
                 "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
@@ -223,7 +223,7 @@ impl Template for QianwenTemplate {
             );
             env.insert(
                 "CLAUDE_CODE_SUBAGENT_MODEL".to_string(),
-                "qwen3.7-max".to_string(),
+                model_name.to_string(),
             );
             env.insert("API_TIMEOUT_MS".to_string(), "600000".to_string());
 
@@ -284,7 +284,7 @@ mod tests {
         );
         assert_eq!(
             env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL").map(String::as_str),
-            Some("qwen3.6-flash")
+            Some("qwen3.8-max-preview")
         );
         assert_eq!(
             env.get("ANTHROPIC_DEFAULT_SONNET_MODEL").map(String::as_str),
@@ -296,7 +296,7 @@ mod tests {
         );
         assert_eq!(
             env.get("CLAUDE_CODE_SUBAGENT_MODEL").map(String::as_str),
-            Some("qwen3.7-max")
+            Some("qwen3.8-max-preview")
         );
         assert_eq!(
             env.get("CLAUDE_CODE_MAX_CONTEXT_TOKENS").map(String::as_str),
@@ -306,11 +306,11 @@ mod tests {
     }
 
     #[test]
-    fn pay_as_you_go_uses_dashscope_and_qwen37_max() {
+    fn pay_as_you_go_uses_dashscope_and_qwen38_max_preview() {
         let settings = QianwenTemplate::pay_as_you_go()
             .create_settings("sk-test", &SnapshotScope::Common);
 
-        assert_eq!(settings.model.as_deref(), Some("qwen3.7-max"));
+        assert_eq!(settings.model.as_deref(), Some("qwen3.8-max-preview"));
         let env = settings.env.unwrap();
         assert_eq!(
             env.get("ANTHROPIC_BASE_URL").map(String::as_str),
@@ -318,11 +318,11 @@ mod tests {
         );
         assert_eq!(
             env.get("ANTHROPIC_MODEL").map(String::as_str),
-            Some("qwen3.7-max")
+            Some("qwen3.8-max-preview")
         );
         assert_eq!(
             env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL").map(String::as_str),
-            Some("qwen3.6-flash")
+            Some("qwen3.8-max-preview")
         );
         // pay-as-you-go has no Token-Plan-specific keys
         assert!(!env.contains_key("CLAUDE_CODE_MAX_CONTEXT_TOKENS"));

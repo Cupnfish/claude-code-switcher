@@ -365,9 +365,19 @@ impl ClaudeSettings {
     /// Merge `template` settings into `existing`, bounded by `scope`.
     ///
     /// The template wins for the fields its scope owns; `existing` fills the
-    /// rest. `env` is always a **key-level union** (template keys override,
-    /// existing keys the template doesn't set are preserved), so switching
-    /// providers never silently drops the user's unrelated env vars.
+    /// rest. `env` is a **key-level union** (template keys override, existing
+    /// keys the template doesn't set are preserved), so switching providers
+    /// never silently drops the user's unrelated env vars.
+    ///
+    /// Because a template apply is a *provider switch*, the small set of
+    /// provider/model routing keys (endpoints, credentials, and every model
+    /// selector such as `ANTHROPIC_MODEL` / `CLAUDE_CODE_SUBAGENT_MODEL`) is
+    /// **reset** before the union: a routing key the new template leaves unset
+    /// is dropped rather than inherited from the previous provider. Without
+    /// this, switching away from a template that sets
+    /// `CLAUDE_CODE_SUBAGENT_MODEL` (e.g. Qianwen) to one that doesn't
+    /// (e.g. GLM) would leave the stale subagent model pointing at the old
+    /// provider.
     ///
     /// This is deliberately separate from `Configurable::merge_with`, whose
     /// scalar-field priority is inconsistent with its env priority
@@ -379,6 +389,12 @@ impl ClaudeSettings {
     ) -> Self {
         let mut merged = existing;
 
+        // A template apply is a provider switch: drop stale provider/model
+        // routing keys the new template doesn't own, so leftovers from the
+        // previous provider (e.g. CLAUDE_CODE_SUBAGENT_MODEL) don't bleed
+        // through. Keys outside this set (the user's custom env) are still
+        // preserved by the union below.
+        strip_provider_model_env(&mut merged.env);
         // env is always a key-level union (template overrides per key)
         merged.env = merge_hashmaps(template.env.clone(), merged.env);
 
@@ -501,6 +517,35 @@ pub fn merge_settings(settings: Vec<ClaudeSettings>) -> ClaudeSettings {
         .fold(ClaudeSettings::new(), |acc, settings| {
             settings.merge_with(acc)
         })
+}
+
+/// Env keys that select which provider/model Claude Code talks to.
+///
+/// Applying a template is a provider switch, so [`ClaudeSettings::merge_by_scope`]
+/// resets these from the existing settings before unioning the template's env.
+/// A key here that the new template leaves unset is dropped rather than
+/// inherited — otherwise the previous provider's model selectors (most visibly
+/// `CLAUDE_CODE_SUBAGENT_MODEL`) would silently survive the switch.
+const PROVIDER_MODEL_ENV_KEYS: &[&str] = &[
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_SMALL_FAST_MODEL",
+    "ANTHROPIC_REASONING_MODEL",
+    "CLAUDE_CODE_SUBAGENT_MODEL",
+];
+
+/// Remove provider/model routing keys from `env`, in place.
+fn strip_provider_model_env(env: &mut Option<HashMap<String, String>>) {
+    if let Some(map) = env {
+        for key in PROVIDER_MODEL_ENV_KEYS {
+            map.remove(*key);
+        }
+    }
 }
 
 /// Helper function to merge hashmaps
@@ -820,6 +865,42 @@ mod tests {
         // template adds its own keys
         assert_eq!(env.get("ANTHROPIC_AUTH_TOKEN"), Some(&"tok".to_string()));
         // existing unrelated key preserved (the data-loss fix)
+        assert_eq!(env.get("MY_CUSTOM_VAR"), Some(&"keep".to_string()));
+    }
+
+    #[test]
+    fn test_merge_by_scope_drops_stale_provider_model_env() {
+        use crate::snapshots::SnapshotScope;
+
+        // Existing settings came from a template that set the subagent model
+        // (e.g. Qianwen setting CLAUDE_CODE_SUBAGENT_MODEL).
+        let mut existing_env = HashMap::new();
+        existing_env.insert(
+            "CLAUDE_CODE_SUBAGENT_MODEL".to_string(),
+            "qwen3.8-max-preview".to_string(),
+        );
+        existing_env.insert("ANTHROPIC_MODEL".to_string(), "qwen3.8-max-preview".to_string());
+        existing_env.insert("MY_CUSTOM_VAR".to_string(), "keep".to_string());
+        let existing = ClaudeSettings {
+            env: Some(existing_env),
+            ..Default::default()
+        };
+
+        // New template (e.g. GLM) does NOT set CLAUDE_CODE_SUBAGENT_MODEL.
+        let mut template_env = HashMap::new();
+        template_env.insert("ANTHROPIC_MODEL".to_string(), "glm-5.2[1m]".to_string());
+        let template = ClaudeSettings {
+            env: Some(template_env),
+            ..Default::default()
+        };
+
+        let merged = ClaudeSettings::merge_by_scope(existing, template, &SnapshotScope::Common);
+        let env = merged.env.expect("merged env should exist");
+        // stale subagent model from the previous provider is dropped
+        assert!(!env.contains_key("CLAUDE_CODE_SUBAGENT_MODEL"));
+        // template's own routing key wins
+        assert_eq!(env.get("ANTHROPIC_MODEL"), Some(&"glm-5.2[1m]".to_string()));
+        // unrelated user env still preserved
         assert_eq!(env.get("MY_CUSTOM_VAR"), Some(&"keep".to_string()));
     }
 
