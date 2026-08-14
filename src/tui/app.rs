@@ -14,6 +14,7 @@ use crate::credentials::{
     ApiKeyChoice, ApiKeySource, CredentialStore, collect_api_key_sources, mask_api_key,
 };
 use crate::prefs::{KeyRef, Prefs};
+use crate::settings::{ModelOverride, ModelTier};
 use crate::snapshots::SnapshotScope;
 use crate::templates::{
     AutoCompactWindow, TemplateType, get_template_instance_with_input, is_generic_target,
@@ -33,6 +34,7 @@ pub struct ApplySelection {
     pub co_author_off: bool,
     pub variant: Option<String>,
     pub auto_compact_window: Option<AutoCompactWindow>,
+    pub model_override: ModelOverride,
 }
 
 /// What an event produced.
@@ -40,7 +42,7 @@ pub enum Outcome {
     /// Keep running.
     Continue,
     /// User confirmed — apply these choices.
-    Apply(ApplySelection),
+    Apply(Box<ApplySelection>),
     /// User cancelled (Esc / q).
     Quit,
 }
@@ -51,8 +53,124 @@ pub enum Mode {
     InputNewKey(TextInput),
     InputRename { idx: usize, input: TextInput },
     ConfirmDelete { idx: usize },
+    ModelEditor(Box<ModelEditorState>),
     Help,
     Message(String),
+}
+
+/// Curated model presets offered for every tier, derived from the models the
+/// built-in templates already use. A `Custom…` entry lets the user type any
+/// model string on top of these.
+const MODEL_PRESETS: &[&str] = &[
+    "claude-fable-5[1m]",
+    "claude-opus-5[1m]",
+    "claude-sonnet-5[1m]",
+    "claude-opus-4-8[1m]",
+    "claude-haiku-4-5",
+    "glm-5.3[1m]",
+    "glm-5.3",
+    "deepseek-v4-pro[1m]",
+    "qwen3.8-max-preview",
+    "kimi-k2.7-code",
+    "MiniMax-M2.5",
+    "LongCat-Flash-Chat",
+];
+const TEMPLATE_DEFAULT_LABEL: &str = "(template default)";
+/// Label of the "Custom…" entry; shared with the view for live custom input.
+pub const CUSTOM_LABEL: &str = "Custom…";
+
+/// Index of the "Custom…" entry in a tier's option list.
+const CUSTOM_IDX: usize = 1 + MODEL_PRESETS.len();
+
+/// Per-tier state for the model editor sub-screen.
+///
+/// Each tier cycles an option list of `[template default, …presets, Custom…]`.
+/// `tier_idx == 0` means "no override" (keep the template's value); the last
+/// index means "Custom" and uses `tier_custom`.
+pub struct ModelEditorState {
+    /// Focused row: 0..4 = a tier, 4 = the Done row.
+    pub tier_cursor: usize,
+    /// Selected option index per tier.
+    tier_idx: [usize; 4],
+    /// Committed custom value per tier (used when `tier_idx == CUSTOM_IDX`).
+    tier_custom: [Option<String>; 4],
+    /// The template's own value per tier, for the `(template: …)` hint.
+    pub tier_defaults: [String; 4],
+    /// Active custom text input for a tier, if any.
+    pub custom_input: Option<(usize, TextInput)>,
+    /// The override as it was when the editor opened; Esc restores this.
+    committed: ModelOverride,
+}
+
+impl ModelEditorState {
+    fn cycle_len() -> usize {
+        CUSTOM_IDX + 1
+    }
+
+    /// Build editor state from the template's per-tier defaults and the current
+    /// committed override.
+    fn from_override(tier_defaults: [String; 4], ov: &ModelOverride) -> Self {
+        let mut tier_idx = [0usize; 4];
+        let mut tier_custom: [Option<String>; 4] = [None, None, None, None];
+        for (i, tier) in ModelTier::ALL.iter().enumerate() {
+            match ov.get(*tier) {
+                None => {} // idx 0 = template default
+                Some(value) => {
+                    if let Some(pos) = MODEL_PRESETS.iter().position(|p| *p == value) {
+                        tier_idx[i] = 1 + pos;
+                    } else {
+                        tier_idx[i] = CUSTOM_IDX;
+                        tier_custom[i] = Some(value.to_string());
+                    }
+                }
+            }
+        }
+        Self {
+            tier_cursor: 0,
+            tier_idx,
+            tier_custom,
+            tier_defaults,
+            custom_input: None,
+            committed: ov.clone(),
+        }
+    }
+
+    /// Whether `tier` is currently set to "no override" (template default).
+    pub fn is_template_default(&self, tier: ModelTier) -> bool {
+        self.tier_idx[tier.as_index()] == 0
+    }
+
+    /// Label shown for the tier's currently selected option.
+    pub fn option_label(&self, tier: ModelTier) -> String {
+        let i = tier.as_index();
+        match self.tier_idx[i] {
+            0 => TEMPLATE_DEFAULT_LABEL.to_string(),
+            idx if idx == CUSTOM_IDX => match &self.tier_custom[i] {
+                Some(v) if !v.is_empty() => format!("Custom: {v}"),
+                _ => CUSTOM_LABEL.to_string(),
+            },
+            idx => MODEL_PRESETS[idx - 1].to_string(),
+        }
+    }
+
+    /// Resolve the editor state into a committed override.
+    fn resolve(&self) -> ModelOverride {
+        let mut ov = ModelOverride::default();
+        for tier in ModelTier::ALL {
+            let i = tier.as_index();
+            let value = match self.tier_idx[i] {
+                0 => None,
+                idx if idx == CUSTOM_IDX => self.tier_custom[i]
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string),
+                idx => Some(MODEL_PRESETS[idx - 1].to_string()),
+            };
+            ov.set(tier, value);
+        }
+        ov
+    }
 }
 
 const EFFORTS: &[&str] = &["max", "xhigh", "high", "medium", "low"];
@@ -98,6 +216,7 @@ fn supported_auto_compact_windows_for(
 enum Row {
     Key(usize),
     NewKey,
+    Model,
     Effort,
     Scope,
     CoAuthor,
@@ -125,6 +244,9 @@ pub struct App {
     has_variant_row: bool,
     auto_compact_windows: Vec<AutoCompactWindow>,
     auto_compact_idx: usize,
+
+    /// Per-tier model override committed from the model editor.
+    model_override: ModelOverride,
 
     usage_cache: HashMap<UsageCacheKey, UsageCacheEntry>,
     usage_in_flight: Option<UsageInFlight>,
@@ -215,6 +337,11 @@ impl App {
             .and_then(|p| p.last_co_author)
             .unwrap_or(prefs.default_co_author);
 
+        // model override: remembered per-template, else none (template defaults)
+        let model_override = tpref
+            .and_then(|p| p.last_model_override.clone())
+            .unwrap_or_default();
+
         // initial cursor: on the selected key if any, else NewKey, else Apply
         let cursor = selected_key.unwrap_or({
             // sources empty → NewKey is row index 0 (== sources.len())
@@ -237,6 +364,7 @@ impl App {
             has_variant_row,
             auto_compact_windows,
             auto_compact_idx,
+            model_override,
             usage_cache: HashMap::new(),
             usage_in_flight: None,
             usage_status: UsageStatus::Unsupported,
@@ -254,7 +382,7 @@ impl App {
         self.sources.len()
     }
     fn n_options(&self) -> usize {
-        3 + if self.has_variant_row { 1 } else { 0 }
+        4 + if self.has_variant_row { 1 } else { 0 }
             + if self.has_auto_compact_row() { 1 } else { 0 }
             + if self.has_usage_row() { 1 } else { 0 }
     }
@@ -279,6 +407,10 @@ impl App {
 
         // option rows start after NewKey
         let mut o = cursor - (nk + 1);
+        if o == 0 {
+            return Row::Model;
+        }
+        o -= 1;
         if o == 0 {
             return Row::Effort;
         }
@@ -360,6 +492,13 @@ impl App {
         &self.usage_status
     }
 
+    /// One-line summary of the committed model override, for the Model option row.
+    pub fn model_summary(&self) -> String {
+        self.model_override
+            .summary()
+            .unwrap_or_else(|| "template defaults".to_string())
+    }
+
     /// Build a template instance reflecting the current variant choice (for
     /// previewing model / base URL).
     pub fn preview_template_instance(&self) -> Box<dyn crate::templates::Template> {
@@ -371,22 +510,28 @@ impl App {
         get_template_instance_with_input(&self.template_type, alias)
     }
 
+    /// The selected key (or a placeholder) for building throwaway preview
+    /// settings — never written anywhere.
+    fn preview_api_key(&self) -> String {
+        self.selected_key
+            .and_then(|i| self.sources.get(i))
+            .map(|s| s.api_key().to_string())
+            .unwrap_or_else(|| "sk-preview".to_string())
+    }
+
     /// Compute the (model, base URL) the current selection would produce, for
     /// the Preview pane.
     pub fn preview_model_and_base(&self) -> (String, String) {
         let inst = self.preview_template_instance();
-        let key = self
-            .selected_key
-            .and_then(|i| self.sources.get(i))
-            .map(|s| s.api_key().to_string())
-            .unwrap_or_else(|| "sk-preview".to_string());
-        let settings = inst
+        let key = self.preview_api_key();
+        let mut settings = inst
             .create_settings_with_auto_compact(
                 &key,
                 &SnapshotScope::Common,
                 self.auto_compact_window(),
             )
             .unwrap_or_else(|_| inst.create_settings(&key, &SnapshotScope::Common));
+        settings.apply_model_override(&self.model_override);
         let model = settings.model.unwrap_or_else(|| "(default)".to_string());
         let base = settings
             .env
@@ -568,6 +713,7 @@ impl App {
                 return self.handle_input_rename(key, idx, input);
             }
             Mode::ConfirmDelete { idx } => return self.handle_confirm_delete(key, idx),
+            Mode::ModelEditor(state) => return self.handle_model_editor(key, *state),
             Mode::Help | Mode::Message(_) => return Outcome::Continue, // self.mode already Normal
             Mode::Normal => {}
         }
@@ -591,6 +737,7 @@ impl App {
                     return self.build_apply();
                 }
                 Row::NewKey => self.mode = Mode::InputNewKey(TextInput::empty()),
+                Row::Model => self.open_model_editor(),
                 Row::Effort => self.cycle_effort(1),
                 Row::Scope => self.cycle_scope(1),
                 Row::CoAuthor => self.co_author = !self.co_author,
@@ -600,6 +747,7 @@ impl App {
                 Row::Apply => return self.build_apply(),
             },
             KeyCode::Char('a') => return self.build_apply(),
+            KeyCode::Char('m') => self.open_model_editor(),
             KeyCode::Char('n') => self.mode = Mode::InputNewKey(TextInput::empty()),
             KeyCode::Char('d') => self.try_delete(),
             KeyCode::Char('r') => self.try_rename(),
@@ -640,7 +788,8 @@ impl App {
             Row::Variant => self.cycle_variant(dir),
             Row::AutoCompact => self.cycle_auto_compact(dir),
             Row::UsageRefresh => self.refresh_usage(true),
-            _ => {}
+            // Model is a launcher (opens an editor), not a ←/→ cycle.
+            Row::Model | Row::Key(_) | Row::NewKey | Row::Apply => {}
         }
     }
 
@@ -700,7 +849,7 @@ impl App {
         {
             let _ = store.touch_last_used(credential.id());
         }
-        Outcome::Apply(ApplySelection {
+        Outcome::Apply(Box::new(ApplySelection {
             key: ApiKeyChoice {
                 key: src.api_key().to_string(),
                 source: Some(src.to_key_ref()),
@@ -714,7 +863,143 @@ impl App {
                 None
             },
             auto_compact_window: self.auto_compact_window(),
-        })
+            model_override: self.model_override.clone(),
+        }))
+    }
+
+    // ── model editor ─────────────────────────────────────────────────────────
+
+    /// Open the per-tier model editor, seeded with the template's own values
+    /// and the currently committed override.
+    fn open_model_editor(&mut self) {
+        let inst = self.preview_template_instance();
+        let key = self.preview_api_key();
+        let settings = inst.create_settings(&key, &SnapshotScope::All);
+        let env = settings.env.as_ref();
+        let tier_defaults = [
+            settings
+                .model
+                .clone()
+                .or_else(|| {
+                    env.and_then(|e| e.get(ModelTier::Primary.env_key()))
+                        .cloned()
+                })
+                .unwrap_or_default(),
+            env.and_then(|e| e.get(ModelTier::Opus.env_key()))
+                .cloned()
+                .unwrap_or_default(),
+            env.and_then(|e| e.get(ModelTier::Sonnet.env_key()))
+                .cloned()
+                .unwrap_or_default(),
+            env.and_then(|e| e.get(ModelTier::Haiku.env_key()))
+                .cloned()
+                .unwrap_or_default(),
+        ];
+        self.mode = Mode::ModelEditor(Box::new(ModelEditorState::from_override(
+            tier_defaults,
+            &self.model_override,
+        )));
+    }
+
+    fn handle_model_editor(&mut self, key: KeyEvent, mut state: ModelEditorState) -> Outcome {
+        // Custom text input captures all keys while active.
+        if let Some((tier_idx, mut input)) = state.custom_input.take() {
+            let next = match key.code {
+                KeyCode::Esc => None, // cancel custom edit, keep editor open
+                KeyCode::Enter => {
+                    // An emptied field clears the custom value (back to the
+                    // plain "Custom…" placeholder) rather than keeping the
+                    // previous one.
+                    let value = input.value().trim().to_string();
+                    state.tier_custom[tier_idx] = (!value.is_empty()).then_some(value);
+                    None
+                }
+                KeyCode::Backspace => {
+                    input.backspace();
+                    Some(input)
+                }
+                KeyCode::Delete => {
+                    input.delete();
+                    Some(input)
+                }
+                KeyCode::Left => {
+                    input.move_left();
+                    Some(input)
+                }
+                KeyCode::Right => {
+                    input.move_right();
+                    Some(input)
+                }
+                KeyCode::Home => {
+                    input.move_start();
+                    Some(input)
+                }
+                KeyCode::End => {
+                    input.move_end();
+                    Some(input)
+                }
+                KeyCode::Char(c) => {
+                    input.insert(c);
+                    Some(input)
+                }
+                _ => Some(input),
+            };
+            state.custom_input = next.map(|i| (tier_idx, i));
+            self.mode = Mode::ModelEditor(Box::new(state));
+            return Outcome::Continue;
+        }
+
+        let cycle_len = ModelEditorState::cycle_len() as i32;
+        let n_tiers = ModelTier::ALL.len();
+        match key.code {
+            KeyCode::Up => {
+                if state.tier_cursor > 0 {
+                    state.tier_cursor -= 1;
+                }
+            }
+            KeyCode::Down => {
+                if state.tier_cursor < n_tiers {
+                    state.tier_cursor += 1;
+                }
+            }
+            KeyCode::Left | KeyCode::Right => {
+                let dir = if key.code == KeyCode::Left { -1 } else { 1 };
+                if state.tier_cursor < n_tiers {
+                    let i = state.tier_cursor;
+                    state.tier_idx[i] =
+                        ((state.tier_idx[i] as i32 + dir).rem_euclid(cycle_len)) as usize;
+                }
+            }
+            KeyCode::Enter => {
+                if state.tier_cursor == n_tiers {
+                    // Done row: commit and close.
+                    self.model_override = state.resolve();
+                    self.mode = Mode::Normal;
+                    return Outcome::Continue;
+                } else if state.tier_idx[state.tier_cursor] == CUSTOM_IDX {
+                    // Open custom text input, pre-filled with any existing value.
+                    let prefill = state.tier_custom[state.tier_cursor]
+                        .clone()
+                        .unwrap_or_default();
+                    state.custom_input = Some((state.tier_cursor, TextInput::new(&prefill)));
+                }
+            }
+            KeyCode::Char('r') => {
+                state.tier_idx = [0; 4];
+                state.tier_custom = [None, None, None, None];
+                state.custom_input = None;
+            }
+            KeyCode::Esc => {
+                // Cancel: restore the override as it was when the editor
+                // opened, discarding any uncommitted edits.
+                self.model_override = state.committed;
+                self.mode = Mode::Normal;
+                return Outcome::Continue;
+            }
+            _ => {}
+        }
+        self.mode = Mode::ModelEditor(Box::new(state));
+        Outcome::Continue
     }
 
     fn try_delete(&mut self) {
@@ -958,6 +1243,7 @@ mod snapshot_tests {
                 AutoCompactWindow::K256,
             ],
             auto_compact_idx: 0,
+            model_override: ModelOverride::default(),
             usage_cache: HashMap::new(),
             usage_in_flight: None,
             usage_status: UsageStatus::Loading {
@@ -1030,7 +1316,7 @@ mod snapshot_tests {
 
         // 3. change effort
         let mut app = base_app();
-        app.cursor = 4; // Effort row (3 keys + newkey + effort)
+        app.cursor = 5; // Effort row (3 keys + newkey + model + effort)
         app.handle_event(key(KeyCode::Left));
         banner("3. EFFORT changed via Left (→ low)", &render(&app, 76, 22));
 
@@ -1097,6 +1383,45 @@ mod snapshot_tests {
             },
         );
         banner("11. USAGE ERROR", &render(&app, 76, 22));
+
+        // 12. model editor just opened (Model row focused & entered)
+        let mut app = base_app();
+        app.cursor = 4; // Model row
+        app.handle_event(key(KeyCode::Enter));
+        banner("12. MODEL EDITOR open", &render(&app, 76, 24));
+
+        // 13. model editor with a preset selected + custom input active
+        let mut app = base_app();
+        app.cursor = 4;
+        app.handle_event(key(KeyCode::Enter)); // open editor
+        app.handle_event(key(KeyCode::Down)); // focus Opus
+        app.handle_event(key(KeyCode::Right)); // Opus -> first preset
+        app.handle_event(key(KeyCode::Up)); // back to Primary
+        for _ in 0..(MODEL_PRESETS.len() as i32 + 1) {
+            app.handle_event(key(KeyCode::Right)); // Primary -> Custom…
+        }
+        app.handle_event(key(KeyCode::Enter)); // open custom input
+        for c in "glm-5.3-air".chars() {
+            app.handle_event(key(KeyCode::Char(c)));
+        }
+        banner(
+            "13. MODEL EDITOR preset + custom typing",
+            &render(&app, 76, 24),
+        );
+
+        // 14. committed uniform override shown on the Model row
+        let mut app = base_app();
+        app.model_override = ModelOverride::uniform("glm-5.3[1m]");
+        banner(
+            "14. MODEL ROW with committed uniform override",
+            &render(&app, 76, 22),
+        );
+
+        // 15. model editor on a narrow terminal (popup clamps to width)
+        let mut app = base_app();
+        app.cursor = 4;
+        app.handle_event(key(KeyCode::Enter));
+        banner("15. MODEL EDITOR narrow 50x20", &render(&app, 50, 20));
     }
 
     #[test]
@@ -1170,14 +1495,14 @@ mod snapshot_tests {
     #[test]
     fn auto_compact_row_changes_preview_and_selection() {
         let mut app = base_app();
-        app.cursor = 8; // 3 keys + new-key + effort + scope + co-author + variant
+        app.cursor = 9; // 3 keys + new-key + model + effort + scope + co-author + variant
 
         app.handle_event(key(KeyCode::Right));
 
         assert_eq!(app.auto_compact_window(), Some(AutoCompactWindow::K768));
         assert_eq!(
             app.preview_model_and_base().0,
-            "glm-5.2[1m]",
+            "glm-5.3[1m]",
             "auto compact must not remove the [1m] model suffix"
         );
 
@@ -1204,6 +1529,146 @@ mod snapshot_tests {
     }
 
     #[test]
+    fn model_editor_cycle_and_apply() {
+        let mut app = base_app();
+        // Model is the first option row: 3 keys + new-key = rows 0..=3, so row 4.
+        app.cursor = 4;
+        app.handle_event(key(KeyCode::Enter));
+        assert!(
+            matches!(app.mode, Mode::ModelEditor(_)),
+            "Enter on the Model row should open the editor"
+        );
+
+        // Focus Opus (tier_cursor 1) and cycle to the first preset.
+        app.handle_event(key(KeyCode::Down));
+        app.handle_event(key(KeyCode::Right)); // idx 1 == MODEL_PRESETS[0]
+        // Navigate to Done (tier_cursor 4) and commit.
+        app.handle_event(key(KeyCode::Down));
+        app.handle_event(key(KeyCode::Down));
+        app.handle_event(key(KeyCode::Down));
+        app.handle_event(key(KeyCode::Enter));
+
+        assert!(matches!(app.mode, Mode::Normal));
+        assert_eq!(
+            app.model_override.get(ModelTier::Opus),
+            Some(MODEL_PRESETS[0]),
+            "cycled Opus tier should be the first preset"
+        );
+        // Other tiers left at template default.
+        assert!(app.model_override.get(ModelTier::Primary).is_none());
+        assert!(
+            app.model_summary()
+                .contains(&format!("Opus:{}", MODEL_PRESETS[0]))
+        );
+    }
+
+    #[test]
+    fn model_editor_reset_clears_overrides() {
+        let mut app = base_app();
+        app.cursor = 4;
+        app.handle_event(key(KeyCode::Enter)); // open editor
+        app.handle_event(key(KeyCode::Right)); // Primary -> first preset (uncommitted)
+        app.handle_event(key(KeyCode::Char('r'))); // reset all tiers
+        // Navigate to Done (tier_cursor 4) and commit.
+        for _ in 0..4 {
+            app.handle_event(key(KeyCode::Down));
+        }
+        app.handle_event(key(KeyCode::Enter));
+
+        assert!(matches!(app.mode, Mode::Normal));
+        assert!(
+            app.model_override.is_empty(),
+            "reset should clear every tier override"
+        );
+        assert_eq!(app.model_summary(), "template defaults");
+    }
+
+    #[test]
+    fn model_editor_esc_discards_uncommitted_changes() {
+        let mut app = base_app();
+        // Commit an Opus override first so we can check it survives Esc.
+        app.cursor = 4;
+        app.handle_event(key(KeyCode::Enter)); // open editor
+        app.handle_event(key(KeyCode::Down)); // focus Opus
+        app.handle_event(key(KeyCode::Right)); // Opus -> first preset
+        for _ in 0..3 {
+            app.handle_event(key(KeyCode::Down));
+        }
+        app.handle_event(key(KeyCode::Enter)); // Done: commit
+
+        // Reopen, make an uncommitted change, then Esc.
+        app.handle_event(key(KeyCode::Enter)); // reopen editor (Model row still focused)
+        app.handle_event(key(KeyCode::Down)); // focus Opus
+        app.handle_event(key(KeyCode::Right)); // uncommitted: Opus -> second preset
+        app.handle_event(key(KeyCode::Esc)); // cancel: discard edits
+
+        assert!(matches!(app.mode, Mode::Normal));
+        assert_eq!(
+            app.model_override.get(ModelTier::Opus),
+            Some(MODEL_PRESETS[0]),
+            "Esc should restore the override as it was when the editor opened"
+        );
+    }
+
+    #[test]
+    fn model_editor_custom_input_commits() {
+        let mut app = base_app();
+        app.cursor = 4;
+        app.handle_event(key(KeyCode::Enter)); // open editor (Primary focused)
+        // Cycle Primary all the way to the Custom… entry.
+        for _ in 0..(MODEL_PRESETS.len() as i32 + 1) {
+            app.handle_event(key(KeyCode::Right));
+        }
+        app.handle_event(key(KeyCode::Enter)); // open custom text input
+        for c in "glm-5.3[1m]".chars() {
+            app.handle_event(key(KeyCode::Char(c)));
+        }
+        app.handle_event(key(KeyCode::Enter)); // commit custom value (stay in editor)
+        for _ in 0..4 {
+            app.handle_event(key(KeyCode::Down));
+        }
+        app.handle_event(key(KeyCode::Enter)); // Done: commit + close
+
+        assert!(matches!(app.mode, Mode::Normal));
+        assert_eq!(
+            app.model_override.get(ModelTier::Primary),
+            Some("glm-5.3[1m]"),
+            "typed custom value should be committed"
+        );
+    }
+
+    #[test]
+    fn model_editor_custom_input_empty_clears_previous_value() {
+        let mut app = base_app();
+        app.cursor = 4;
+        app.handle_event(key(KeyCode::Enter)); // open editor (Primary focused)
+        for _ in 0..(MODEL_PRESETS.len() as i32 + 1) {
+            app.handle_event(key(KeyCode::Right)); // cycle to Custom…
+        }
+        app.handle_event(key(KeyCode::Enter)); // open custom input
+        for c in "glm-5.3".chars() {
+            app.handle_event(key(KeyCode::Char(c)));
+        }
+        app.handle_event(key(KeyCode::Enter)); // commit custom value
+
+        // Reopen the custom input, clear it entirely, commit again.
+        app.handle_event(key(KeyCode::Enter));
+        for _ in 0.."glm-5.3".len() {
+            app.handle_event(key(KeyCode::Backspace));
+        }
+        app.handle_event(key(KeyCode::Enter)); // empty -> clears the custom value
+        for _ in 0..4 {
+            app.handle_event(key(KeyCode::Down));
+        }
+        app.handle_event(key(KeyCode::Enter)); // Done
+
+        assert!(
+            app.model_override.is_empty(),
+            "clearing the custom field should drop the override, not keep the old value"
+        );
+    }
+
+    #[test]
     fn usage_snapshot_states_cover_loading_ready_and_stale_error() {
         let loading = render(
             &with_usage(
@@ -1217,7 +1682,7 @@ mod snapshot_tests {
                 },
             ),
             76,
-            22,
+            24,
         );
         assert!(loading.contains("usage: / loading"));
         assert!(loading.contains("cached: ZHIPU 5h 42%"));
@@ -1229,7 +1694,7 @@ mod snapshot_tests {
                 UsageStatus::Ready(usage_report("DeepSeek", "available | CNY 12.34")),
             ),
             76,
-            22,
+            24,
         );
         assert!(ready.contains("usage: DeepSeek available | CNY 12.34"));
 
@@ -1242,7 +1707,7 @@ mod snapshot_tests {
                 },
             ),
             76,
-            22,
+            24,
         );
         assert!(error.contains("usage: error: request failed"));
         assert!(error.contains("cached: DeepSeek available | CNY 12.34"));

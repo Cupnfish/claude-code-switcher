@@ -63,7 +63,7 @@ pub fn run_apply_tui(
                 }
                 match app.handle_event(k) {
                     Outcome::Continue => continue,
-                    Outcome::Apply(sel) => break Ok(Some(sel)),
+                    Outcome::Apply(sel) => break Ok(Some(*sel)),
                     Outcome::Quit => break Ok(None),
                 }
             }

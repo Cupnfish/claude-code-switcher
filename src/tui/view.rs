@@ -9,7 +9,8 @@ use ratatui::{
 };
 
 use crate::credentials::{ApiKeySource, mask_api_key};
-use crate::tui::app::{App, Mode};
+use crate::settings::ModelTier;
+use crate::tui::app::{App, CUSTOM_LABEL, Mode, ModelEditorState};
 use crate::tui::input::TextInput;
 use crate::usage::{UsageReport, UsageStatus};
 
@@ -161,6 +162,12 @@ fn render_body(frame: &mut Frame, app: &App, area: Rect) {
     // Options section
     rows.push(header("Options   (←/→ to change)"));
     let cur = app.cursor();
+    rows.push(option_row(
+        "Model    ",
+        &truncate(&app.model_summary(), 44),
+        cur == row_idx,
+    ));
+    row_idx += 1;
     rows.push(option_row("Effort   ", app.effort(), cur == row_idx));
     row_idx += 1;
     rows.push(option_row(
@@ -337,7 +344,7 @@ fn truncate(value: &str, max_chars: usize) -> String {
 }
 
 fn render_help(frame: &mut Frame, area: Rect) {
-    let help = " ↑/↓ move · ←/→ change · u refresh usage · a apply · n new · d delete · r rename · ? help · Esc quit ";
+    let help = " ↑/↓ move · ←/→ change · m model · u refresh usage · a apply · n new · d delete · r rename · ? help · Esc quit ";
     let p = Paragraph::new(Line::from(vec![Span::styled(
         help,
         Style::default().fg(Color::DarkGray),
@@ -348,9 +355,15 @@ fn render_help(frame: &mut Frame, area: Rect) {
 
 fn render_popup(frame: &mut Frame, app: &App) {
     let mode = app.mode_ref();
-    let (title, lines, height): (String, Vec<Line>, u16) = match mode {
-        Mode::InputNewKey(input) => input_popup("Create new API key", "Paste your API key:", input),
-        Mode::InputRename { input, .. } => input_popup("Rename key", "New name:", input),
+    let (title, lines, width, height): (String, Vec<Line>, u16, u16) = match mode {
+        Mode::InputNewKey(input) => {
+            let (t, l, h) = input_popup("Create new API key", "Paste your API key:", input);
+            (t, l, 64, h)
+        }
+        Mode::InputRename { input, .. } => {
+            let (t, l, h) = input_popup("Rename key", "New name:", input);
+            (t, l, 64, h)
+        }
         Mode::ConfirmDelete { .. } => (
             "Confirm delete".to_string(),
             vec![
@@ -369,9 +382,11 @@ fn render_popup(frame: &mut Frame, app: &App) {
                     Span::raw(" cancel"),
                 ]),
             ],
+            64,
             6,
         ),
-        Mode::Help => ("Help".to_string(), help_lines(), 11),
+        Mode::ModelEditor(state) => render_model_editor(state),
+        Mode::Help => ("Help".to_string(), help_lines(), 64, 13),
         Mode::Message(msg) => (
             "Notice".to_string(),
             vec![
@@ -386,12 +401,13 @@ fn render_popup(frame: &mut Frame, app: &App) {
                     Style::default().fg(Color::DarkGray),
                 )]),
             ],
+            64,
             6,
         ),
         Mode::Normal => return,
     };
 
-    let area = popup_area(64, height, frame.area());
+    let area = popup_area(width, height, frame.area());
     let block = Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(
@@ -451,6 +467,96 @@ fn input_popup(title: &str, prompt: &str, input: &TextInput) -> (String, Vec<Lin
     (title.to_string(), lines, 7)
 }
 
+/// Render the per-tier model editor popup: `(title, lines, width, height)`.
+fn render_model_editor(state: &ModelEditorState) -> (String, Vec<Line<'static>>, u16, u16) {
+    let n_tiers = ModelTier::ALL.len();
+    let mut lines: Vec<Line<'static>> = vec![Line::from(Span::raw(""))];
+
+    // One row per tier, showing the selected option + a template-default hint.
+    for (i, &tier) in ModelTier::ALL.iter().enumerate() {
+        let is_cur = state.tier_cursor == i;
+        // While this tier's custom input is active, mirror the live text in
+        // the row so the value being typed is visible next to the tier.
+        let value = match &state.custom_input {
+            Some((ti, input)) if *ti == i => match input.value().trim() {
+                "" => CUSTOM_LABEL.to_string(),
+                v => format!("Custom: {v}"),
+            },
+            _ => state.option_label(tier),
+        };
+        let mut spans = vec![Span::raw(cursor_prefix(is_cur).to_string())];
+        spans.push(Span::styled(
+            format!(" {:<8}", tier.label()),
+            Style::default().fg(Color::Gray),
+        ));
+        spans.push(Span::styled(
+            format!("[ {value} ]"),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+        if !state.is_template_default(tier) {
+            spans.push(Span::styled(
+                format!("   (template: {})", state.tier_defaults[i]),
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+        lines.push(Line::from(spans));
+    }
+
+    // Done row.
+    let done_cur = state.tier_cursor == n_tiers;
+    lines.push(Line::from(vec![
+        Span::raw(cursor_prefix(done_cur).to_string()),
+        Span::styled(
+            "► Done".to_string(),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]));
+    lines.push(Line::from(Span::raw("")));
+
+    // Active custom text input for the focused tier, if any.
+    if let Some((_, input)) = &state.custom_input {
+        lines.push(custom_input_line(input));
+    }
+
+    lines.push(Line::from(vec![Span::styled(
+        " ↑/↓ tier · ←/→ change · Enter custom/Done · r reset · Esc cancel ",
+        Style::default().fg(Color::DarkGray),
+    )]));
+
+    let height = lines.len() as u16 + 2; // +2 for the popup border
+    ("Model overrides".to_string(), lines, 76, height)
+}
+
+/// One editable line for the active custom-model text input, with a cursor block.
+fn custom_input_line(input: &TextInput) -> Line<'static> {
+    let val = input.value();
+    let cbyte = input.cursor_byte().min(val.len());
+    let before = val[..cbyte].to_string();
+    let (cur_ch, after) = if cbyte < val.len() {
+        let mut it = val[cbyte..].chars();
+        let ch = it.next().map(|c| c.to_string()).unwrap_or_default();
+        (ch, it.collect::<String>())
+    } else {
+        (" ".to_string(), String::new())
+    };
+    Line::from(vec![
+        Span::styled(" custom: ", Style::default().fg(Color::Gray)),
+        Span::raw(before),
+        Span::styled(
+            cur_ch,
+            Style::default()
+                .bg(Color::Cyan)
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(after),
+    ])
+}
+
 fn help_lines() -> Vec<Line<'static>> {
     let b = |k: &str, d: &str| {
         Line::from(vec![
@@ -463,6 +569,10 @@ fn help_lines() -> Vec<Line<'static>> {
         b("↑/↓", "move cursor (key list → options → Apply)"),
         b("←/→", "change the focused option's value"),
         b("Enter", "on a key: select & apply · ➕: new · Apply: apply"),
+        b(
+            "m",
+            "edit per-tier model override (Primary / Opus / Sonnet / Haiku)",
+        ),
         b("a", "apply now (selected key + current options)"),
         b(
             "u",

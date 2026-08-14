@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
+use crate::settings::ModelOverride;
 use crate::snapshots::SnapshotScope;
 use crate::templates::{AutoCompactWindow, TemplateType};
 
@@ -58,6 +59,11 @@ pub struct TemplatePref {
     /// context-window implementation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_context_window: Option<String>,
+
+    /// Last-used per-tier model override for this template (`None` = no
+    /// override; an all-`None` [`ModelOverride`] means "use template defaults").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_model_override: Option<ModelOverride>,
 
     /// Timestamp of the last apply for this template.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -214,6 +220,18 @@ impl Prefs {
         pref.last_used_at = Some(crate::utils::get_timestamp());
     }
 
+    /// Record the last-used per-tier model override for a template type.
+    /// Pass `None` (or an all-`None` [`ModelOverride`]) to clear it.
+    pub fn set_last_model_override(
+        &mut self,
+        template_type: &TemplateType,
+        model_override: Option<ModelOverride>,
+    ) {
+        let pref = self.template_pref_mut(template_type);
+        pref.last_model_override = model_override.filter(|o| !o.is_empty());
+        pref.last_used_at = Some(crate::utils::get_timestamp());
+    }
+
     /// Record everything from a completed apply in one go.
     #[allow(clippy::too_many_arguments)]
     pub fn record_apply(
@@ -225,6 +243,7 @@ impl Prefs {
         effort: Option<String>,
         co_author: bool,
         auto_compact_window: Option<AutoCompactWindow>,
+        model_override: Option<ModelOverride>,
     ) {
         let pref = self.template_pref_mut(template_type);
         pref.variant = variant;
@@ -234,6 +253,7 @@ impl Prefs {
         pref.last_co_author = Some(co_author);
         pref.last_auto_compact_window = auto_compact_window.map(|c| c.to_string());
         pref.last_context_window = None;
+        pref.last_model_override = model_override.filter(|o| !o.is_empty());
         pref.last_used_at = Some(crate::utils::get_timestamp());
     }
 }
@@ -287,6 +307,38 @@ mod tests {
                 .last_auto_compact_window
                 .as_deref(),
             Some("512k")
+        );
+    }
+
+    #[test]
+    fn test_prefs_model_override_roundtrip() {
+        let mut prefs = Prefs::default();
+        let ov = ModelOverride {
+            primary: Some("claude-fable-5[1m]".to_string()),
+            sonnet: Some("claude-sonnet-5[1m]".to_string()),
+            ..Default::default()
+        };
+        prefs.set_last_model_override(&TemplateType::BeeApi, Some(ov.clone()));
+
+        let json = serde_json::to_string(&prefs).unwrap();
+        let restored: Prefs = serde_json::from_str(&json).unwrap();
+
+        let got = restored
+            .template_pref(&TemplateType::BeeApi)
+            .unwrap()
+            .last_model_override
+            .clone()
+            .expect("model override should be stored");
+        assert_eq!(got, ov);
+
+        // An all-None override is treated as "no override" and not stored.
+        prefs.set_last_model_override(&TemplateType::BeeApi, Some(ModelOverride::default()));
+        assert!(
+            prefs
+                .template_pref(&TemplateType::BeeApi)
+                .unwrap()
+                .last_model_override
+                .is_none()
         );
     }
 

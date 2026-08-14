@@ -382,11 +382,7 @@ impl ClaudeSettings {
     /// This is deliberately separate from `Configurable::merge_with`, whose
     /// scalar-field priority is inconsistent with its env priority
     /// (`settings.rs` `merge_with`).
-    pub fn merge_by_scope(
-        existing: Self,
-        template: Self,
-        scope: &SnapshotScope,
-    ) -> Self {
+    pub fn merge_by_scope(existing: Self, template: Self, scope: &SnapshotScope) -> Self {
         let mut merged = existing;
 
         // A template apply is a provider switch: drop stale provider/model
@@ -427,9 +423,11 @@ impl ClaudeSettings {
                 merged.cleanup_period_days =
                     template.cleanup_period_days.or(merged.cleanup_period_days);
                 merged.disable_all_hooks = template.disable_all_hooks.or(merged.disable_all_hooks);
-                merged.force_login_method = template.force_login_method.or(merged.force_login_method);
-                merged.force_login_org_uuid =
-                    template.force_login_org_uuid.or(merged.force_login_org_uuid);
+                merged.force_login_method =
+                    template.force_login_method.or(merged.force_login_method);
+                merged.force_login_org_uuid = template
+                    .force_login_org_uuid
+                    .or(merged.force_login_org_uuid);
                 merged.enable_all_project_mcp_servers = template
                     .enable_all_project_mcp_servers
                     .or(merged.enable_all_project_mcp_servers);
@@ -440,12 +438,151 @@ impl ClaudeSettings {
                     .disabled_mcpjson_servers
                     .or(merged.disabled_mcpjson_servers);
                 merged.aws_auth_refresh = template.aws_auth_refresh.or(merged.aws_auth_refresh);
-                merged.aws_credential_export =
-                    template.aws_credential_export.or(merged.aws_credential_export);
+                merged.aws_credential_export = template
+                    .aws_credential_export
+                    .or(merged.aws_credential_export);
             }
         }
 
         merged
+    }
+
+    /// Apply a per-tier model override on top of the template's settings.
+    ///
+    /// Only tiers set to `Some` are rewritten; tiers left `None` keep the
+    /// template's value. Must be called on the template-output settings before
+    /// [`ClaudeSettings::merge_by_scope`] so the override wins the env union.
+    pub fn apply_model_override(&mut self, model_override: &ModelOverride) {
+        for tier in ModelTier::ALL {
+            if let Some(value) = model_override.get(tier) {
+                self.env
+                    .get_or_insert_with(HashMap::new)
+                    .insert(tier.env_key().to_string(), value.to_string());
+                if tier == ModelTier::Primary {
+                    self.model = Some(value.to_string());
+                }
+            }
+        }
+    }
+}
+
+/// A Claude Code model tier that can be overridden independently at apply time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ModelTier {
+    Primary,
+    Opus,
+    Sonnet,
+    Haiku,
+}
+
+impl ModelTier {
+    /// All tiers in display order.
+    pub const ALL: [ModelTier; 4] = [Self::Primary, Self::Opus, Self::Sonnet, Self::Haiku];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Primary => "Primary",
+            Self::Opus => "Opus",
+            Self::Sonnet => "Sonnet",
+            Self::Haiku => "Haiku",
+        }
+    }
+
+    /// Env key this tier rewrites. `Primary` additionally rewrites the
+    /// top-level `model` field (handled in [`ClaudeSettings::apply_model_override`]).
+    pub fn env_key(self) -> &'static str {
+        match self {
+            Self::Primary => "ANTHROPIC_MODEL",
+            Self::Opus => "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            Self::Sonnet => "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            Self::Haiku => "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        }
+    }
+
+    pub fn as_index(self) -> usize {
+        Self::ALL.iter().position(|&t| t == self).unwrap()
+    }
+}
+
+/// Per-tier model override applied on top of a template's settings.
+///
+/// Each tier is `None` (keep the template's value) or `Some(model)`. An
+/// all-`None` value means "no override". Serialized into `ccs-prefs.json`
+/// under `last_model_override`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelOverride {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opus: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sonnet: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub haiku: Option<String>,
+}
+
+impl ModelOverride {
+    /// Returns the override for `tier`, if any.
+    pub fn get(&self, tier: ModelTier) -> Option<&str> {
+        match tier {
+            ModelTier::Primary => self.primary.as_deref(),
+            ModelTier::Opus => self.opus.as_deref(),
+            ModelTier::Sonnet => self.sonnet.as_deref(),
+            ModelTier::Haiku => self.haiku.as_deref(),
+        }
+    }
+
+    /// Sets the override for `tier` (`None` clears it).
+    pub fn set(&mut self, tier: ModelTier, value: Option<String>) {
+        match tier {
+            ModelTier::Primary => self.primary = value,
+            ModelTier::Opus => self.opus = value,
+            ModelTier::Sonnet => self.sonnet = value,
+            ModelTier::Haiku => self.haiku = value,
+        }
+    }
+
+    /// True when no tier is overridden.
+    pub fn is_empty(&self) -> bool {
+        self.primary.is_none()
+            && self.opus.is_none()
+            && self.sonnet.is_none()
+            && self.haiku.is_none()
+    }
+
+    /// Override every tier with the same model. This is what `--model X` maps
+    /// to, so the flag actually takes effect (it previously only set the
+    /// top-level `model` field, which Claude Code ignores in favour of the
+    /// `ANTHROPIC_*` env keys).
+    pub fn uniform(model: impl Into<String>) -> Self {
+        let model = model.into();
+        Self {
+            primary: Some(model.clone()),
+            opus: Some(model.clone()),
+            sonnet: Some(model.clone()),
+            haiku: Some(model),
+        }
+    }
+
+    /// Compact human-readable summary: `None` when empty, `all:<model>` when
+    /// every set tier shares one value, `Tier:value · …` otherwise. Shared by
+    /// the TUI Model row and the CLI apply summary.
+    pub fn summary(&self) -> Option<String> {
+        let set: Vec<(&str, &str)> = ModelTier::ALL
+            .iter()
+            .filter_map(|&tier| self.get(tier).map(|v| (tier.label(), v)))
+            .collect();
+        let first_value = set.first().map(|(_, v)| *v)?;
+        if set.len() == ModelTier::ALL.len() && set.iter().all(|&(_, v)| v == first_value) {
+            // Fully uniform (the `--model` shape) reads best without tier noise.
+            return Some(format!("all:{first_value}"));
+        }
+        Some(
+            set.iter()
+                .map(|(label, v)| format!("{label}:{v}"))
+                .collect::<Vec<_>>()
+                .join(" · "),
+        )
     }
 }
 
@@ -879,7 +1016,10 @@ mod tests {
             "CLAUDE_CODE_SUBAGENT_MODEL".to_string(),
             "qwen3.8-max-preview".to_string(),
         );
-        existing_env.insert("ANTHROPIC_MODEL".to_string(), "qwen3.8-max-preview".to_string());
+        existing_env.insert(
+            "ANTHROPIC_MODEL".to_string(),
+            "qwen3.8-max-preview".to_string(),
+        );
         existing_env.insert("MY_CUSTOM_VAR".to_string(), "keep".to_string());
         let existing = ClaudeSettings {
             env: Some(existing_env),
@@ -888,7 +1028,7 @@ mod tests {
 
         // New template (e.g. GLM) does NOT set CLAUDE_CODE_SUBAGENT_MODEL.
         let mut template_env = HashMap::new();
-        template_env.insert("ANTHROPIC_MODEL".to_string(), "glm-5.2[1m]".to_string());
+        template_env.insert("ANTHROPIC_MODEL".to_string(), "glm-5.3[1m]".to_string());
         let template = ClaudeSettings {
             env: Some(template_env),
             ..Default::default()
@@ -899,7 +1039,7 @@ mod tests {
         // stale subagent model from the previous provider is dropped
         assert!(!env.contains_key("CLAUDE_CODE_SUBAGENT_MODEL"));
         // template's own routing key wins
-        assert_eq!(env.get("ANTHROPIC_MODEL"), Some(&"glm-5.2[1m]".to_string()));
+        assert_eq!(env.get("ANTHROPIC_MODEL"), Some(&"glm-5.3[1m]".to_string()));
         // unrelated user env still preserved
         assert_eq!(env.get("MY_CUSTOM_VAR"), Some(&"keep".to_string()));
     }
@@ -972,5 +1112,166 @@ mod tests {
 
         let merged = ClaudeSettings::merge_by_scope(existing, template, &SnapshotScope::Common);
         assert_eq!(merged.model, Some("keep".to_string()));
+    }
+
+    #[test]
+    fn apply_model_override_primary_writes_model_and_env() {
+        let mut settings = ClaudeSettings {
+            env: Some(HashMap::new()),
+            ..Default::default()
+        };
+        let ov = ModelOverride {
+            primary: Some("claude-fable-5[1m]".to_string()),
+            ..Default::default()
+        };
+        settings.apply_model_override(&ov);
+        assert_eq!(settings.model, Some("claude-fable-5[1m]".to_string()));
+        assert_eq!(
+            settings.env.as_ref().unwrap().get("ANTHROPIC_MODEL"),
+            Some(&"claude-fable-5[1m]".to_string())
+        );
+    }
+
+    #[test]
+    fn apply_model_override_writes_each_tier() {
+        let mut settings = ClaudeSettings {
+            env: Some(HashMap::new()),
+            ..Default::default()
+        };
+        let ov = ModelOverride {
+            primary: Some("p".to_string()),
+            opus: Some("o".to_string()),
+            sonnet: Some("s".to_string()),
+            haiku: Some("h".to_string()),
+        };
+        settings.apply_model_override(&ov);
+        let env = settings.env.as_ref().unwrap();
+        assert_eq!(env.get("ANTHROPIC_MODEL"), Some(&"p".to_string()));
+        assert_eq!(
+            env.get("ANTHROPIC_DEFAULT_OPUS_MODEL"),
+            Some(&"o".to_string())
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_DEFAULT_SONNET_MODEL"),
+            Some(&"s".to_string())
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL"),
+            Some(&"h".to_string())
+        );
+    }
+
+    #[test]
+    fn apply_model_override_noops_none_tiers() {
+        // Template's own value must survive for tiers left at None.
+        let mut env = HashMap::new();
+        env.insert(
+            "ANTHROPIC_MODEL".to_string(),
+            "template-primary".to_string(),
+        );
+        env.insert(
+            "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
+            "template-opus".to_string(),
+        );
+        let mut settings = ClaudeSettings {
+            env: Some(env),
+            model: Some("template-primary".to_string()),
+            ..Default::default()
+        };
+        // Override only Sonnet; everything else stays.
+        let ov = ModelOverride {
+            sonnet: Some("sonnet-5".to_string()),
+            ..Default::default()
+        };
+        settings.apply_model_override(&ov);
+        let env = settings.env.as_ref().unwrap();
+        assert_eq!(
+            env.get("ANTHROPIC_MODEL"),
+            Some(&"template-primary".to_string())
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_DEFAULT_OPUS_MODEL"),
+            Some(&"template-opus".to_string())
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_DEFAULT_SONNET_MODEL"),
+            Some(&"sonnet-5".to_string())
+        );
+        assert_eq!(settings.model, Some("template-primary".to_string()));
+    }
+
+    #[test]
+    fn apply_model_override_handles_env_none() {
+        let mut settings = ClaudeSettings::new();
+        let ov = ModelOverride {
+            opus: Some("opus-5".to_string()),
+            ..Default::default()
+        };
+        settings.apply_model_override(&ov);
+        let env = settings.env.expect("env should be initialized");
+        assert_eq!(
+            env.get("ANTHROPIC_DEFAULT_OPUS_MODEL"),
+            Some(&"opus-5".to_string())
+        );
+    }
+
+    #[test]
+    fn apply_model_override_empty_is_noop() {
+        let mut settings = ClaudeSettings {
+            env: Some(HashMap::new()),
+            model: Some("keep".to_string()),
+            ..Default::default()
+        };
+        settings.apply_model_override(&ModelOverride::default());
+        assert_eq!(settings.model, Some("keep".to_string()));
+        assert!(settings.env.as_ref().unwrap().is_empty());
+    }
+
+    #[test]
+    fn model_override_uniform_sets_all_tiers() {
+        let ov = ModelOverride::uniform("claude-opus-5[1m]");
+        assert_eq!(ov.get(ModelTier::Primary), Some("claude-opus-5[1m]"));
+        assert_eq!(ov.get(ModelTier::Opus), Some("claude-opus-5[1m]"));
+        assert_eq!(ov.get(ModelTier::Sonnet), Some("claude-opus-5[1m]"));
+        assert_eq!(ov.get(ModelTier::Haiku), Some("claude-opus-5[1m]"));
+        assert!(!ov.is_empty());
+    }
+
+    #[test]
+    fn model_override_summary_collapses_uniform() {
+        assert_eq!(ModelOverride::default().summary(), None);
+        assert_eq!(
+            ModelOverride::uniform("glm-5.3[1m]").summary(),
+            Some("all:glm-5.3[1m]".to_string())
+        );
+        let ov = ModelOverride {
+            opus: Some("claude-opus-5[1m]".to_string()),
+            sonnet: Some("claude-sonnet-5[1m]".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            ov.summary(),
+            Some("Opus:claude-opus-5[1m] · Sonnet:claude-sonnet-5[1m]".to_string())
+        );
+        // A single set tier must not collapse to "all:" — it names the tier.
+        let one = ModelOverride {
+            haiku: Some("claude-haiku-4-5".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(one.summary(), Some("Haiku:claude-haiku-4-5".to_string()));
+    }
+
+    #[test]
+    fn model_override_serde_skips_unset_tiers() {
+        let ov = ModelOverride {
+            sonnet: Some("claude-sonnet-5[1m]".to_string()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&ov).unwrap();
+        assert!(json.contains("sonnet"));
+        assert!(!json.contains("primary"));
+        assert!(!json.contains("opus"));
+        let back: ModelOverride = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, ov);
     }
 }

@@ -35,8 +35,11 @@ pub fn default_allow_list() -> Vec<String> {
         "TodoWrite".to_string(),
         "NotebookEdit".to_string(),
     ];
-    #[cfg(target_os = "windows")]
-    list.push("PowerShell".to_string());
+    // `cfg!` keeps the `mut` live on every platform (an attribute-gated push
+    // would trip unused_mut in CI's -D warnings Linux builds).
+    if cfg!(target_os = "windows") {
+        list.push("PowerShell".to_string());
+    }
     list
 }
 

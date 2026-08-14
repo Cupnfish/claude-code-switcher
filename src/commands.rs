@@ -2,7 +2,7 @@ use crate::{
     Configurable, CredentialManager, cli,
     credentials::{CredentialStore, mask_api_key, resolve_api_key},
     prefs::{KeyRef, Prefs},
-    settings::{Attribution, ClaudeSettings},
+    settings::{Attribution, ClaudeSettings, ModelOverride},
     snapshots::{self, SnapshotScope, SnapshotStore},
     templates::{
         AutoCompactWindow, TemplateType, get_all_templates, get_template_instance,
@@ -40,8 +40,9 @@ fn inject_common_env_vars(settings: &mut ClaudeSettings) {
         }
     } else {
         let mut env = get_common_env_vars();
-        #[cfg(target_os = "windows")]
-        {
+        // `cfg!` keeps the `mut` live on every platform (an attribute-gated
+        // insert would trip unused_mut in CI's -D warnings Linux builds).
+        if cfg!(target_os = "windows") {
             env.insert(
                 "CLAUDE_CODE_USE_POWERSHELL_TOOL".to_string(),
                 "1".to_string(),
@@ -470,11 +471,17 @@ fn print_apply_summary(
     settings: &ClaudeSettings,
     key: &str,
     auto_compact_window: Option<AutoCompactWindow>,
+    model_override: &ModelOverride,
 ) {
     println!();
     println!("{} applying '{}'", style("•").cyan(), template_type);
     if let Some(m) = &settings.model {
         println!("  model:  {}", m);
+    }
+    // Per-tier overrides (Opus/Sonnet/Haiku especially) are invisible in the
+    // merged settings, so surface them explicitly.
+    if let Some(summary) = model_override.summary() {
+        println!("  models: {}", summary);
     }
     println!("  key:    {}", mask_api_key(key));
     if let Some(e) = &settings.effort_level {
@@ -516,9 +523,16 @@ fn apply_template_command(
     let use_tui = !non_interactive && !yes;
     let mut prefs = Prefs::load_or_default();
 
-    // Gather intent: (variant alias, key, effort, compact, scope, co-author-off).
-    let (variant_alias, key_choice, effort, auto_compact_window, scope, co_author_off) = if use_tui
-    {
+    // Gather intent: (variant alias, key, effort, compact, scope, co-author-off, model override).
+    let (
+        variant_alias,
+        key_choice,
+        effort,
+        auto_compact_window,
+        scope,
+        co_author_off,
+        selected_model_override,
+    ) = if use_tui {
         let display = get_template_instance(template_type)
             .display_name()
             .to_string();
@@ -537,6 +551,7 @@ fn apply_template_command(
                 sel.auto_compact_window,
                 sel.scope,
                 sel.co_author_off,
+                sel.model_override,
             ),
             None => {
                 println!("Cancelled.");
@@ -577,7 +592,31 @@ fn apply_template_command(
             &prefs,
         )?;
         let cao = resolve_co_author_off(no_co_author, &prefs);
-        (va, kc, eff, compact, scope.clone(), cao)
+        // Remembered per-tier model override (None tiers = use template defaults).
+        let remembered_model_override = prefs
+            .template_pref(template_type)
+            .and_then(|p| p.last_model_override.clone())
+            .unwrap_or_default();
+        (
+            va,
+            kc,
+            eff,
+            compact,
+            scope.clone(),
+            cao,
+            remembered_model_override,
+        )
+    };
+
+    // --model flag wins uniformly over any TUI selection or remembered pref.
+    // `uniform` rewrites every tier + the top-level model, so the flag actually
+    // takes effect (previously it only set `settings.model`, which Claude Code
+    // ignores in favour of the ANTHROPIC_* env keys).
+    let model_override = if let Some(m) = model.as_deref().map(str::trim).filter(|m| !m.is_empty())
+    {
+        ModelOverride::uniform(m)
+    } else {
+        selected_model_override
     };
 
     // Build template settings from the resolved alias + key + scope.
@@ -599,10 +638,8 @@ fn apply_template_command(
             .insert("CLAUDE_CODE_GIT_BASH_PATH".to_string(), git_bash_path);
     }
 
-    // --model override
-    if let Some(model_name) = model {
-        settings.model = Some(model_name.clone());
-    }
+    // Per-tier model override (from --model, the TUI editor, or remembered pref).
+    settings.apply_model_override(&model_override);
 
     // effort + co-author from the resolved selection
     settings.effort_level = effort.clone();
@@ -623,7 +660,13 @@ fn apply_template_command(
         backup_settings(settings_path)?;
     }
 
-    print_apply_summary(template_type, &merged, &key_choice.key, auto_compact_window);
+    print_apply_summary(
+        template_type,
+        &merged,
+        &key_choice.key,
+        auto_compact_window,
+        &model_override,
+    );
 
     if dry_run {
         println!("{} (dry-run — no changes written)", style("•").yellow());
@@ -641,6 +684,11 @@ fn apply_template_command(
         effort.clone(),
         !co_author_off,
         auto_compact_window,
+        if model_override.is_empty() {
+            None
+        } else {
+            Some(model_override.clone())
+        },
     );
     prefs.save()?;
 
@@ -667,11 +715,17 @@ fn apply_snapshot_command(
 
     let mut snapshot = store.load_by_name(snapshot_name)?;
 
-    snapshot.settings = snapshot.settings.filter_by_scope(scope);
-
+    // --model on a snapshot applies uniformly across all tiers (consistent
+    // with the template apply path; rewrites the ANTHROPIC_* env keys too).
+    // Applied before the scope filter, per apply_model_override's contract,
+    // so e.g. `--scope env` still only writes env keys.
     if let Some(model_name) = model {
-        snapshot.settings.model = Some(model_name.clone());
+        snapshot
+            .settings
+            .apply_model_override(&ModelOverride::uniform(model_name));
     }
+
+    snapshot.settings = snapshot.settings.filter_by_scope(scope);
 
     let existing_settings = ClaudeSettings::from_file(settings_path)?;
 

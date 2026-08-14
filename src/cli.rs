@@ -32,8 +32,11 @@ pub enum Commands {
         #[arg(long, default_value = "common", help = "Scope of settings to include")]
         scope: SnapshotScope,
 
-        /// Override model setting
-        #[arg(long, help = "Override model setting")]
+        /// Override every model tier uniformly
+        #[arg(
+            long,
+            help = "Override all 4 model tiers uniformly (Primary/Opus/Sonnet/Haiku)"
+        )]
         model: Option<String>,
 
         /// Path to settings file (default: .claude/settings.json)

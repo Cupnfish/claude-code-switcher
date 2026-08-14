@@ -20,8 +20,8 @@ pub enum ZaiRegion {
 impl ZaiRegion {
     pub fn base_model_name(&self) -> &'static str {
         match self {
-            ZaiRegion::China => "glm-5.2",
-            ZaiRegion::International => "glm-5.2",
+            ZaiRegion::China => "glm-5.3",
+            ZaiRegion::International => "glm-5.3",
         }
     }
 
@@ -35,10 +35,10 @@ impl ZaiRegion {
     pub fn description(&self) -> &'static str {
         match self {
             ZaiRegion::China => {
-                "Zhipu AI GLM-5.2 in China - Coding aligned with Claude Opus 4.6, 1M context with thinking capabilities"
+                "Zhipu AI GLM-5.3 in China - Coding aligned with Claude Opus 4.6, 1M context with thinking capabilities"
             }
             ZaiRegion::International => {
-                "Zhipu AI GLM-5.2 International - Global access with 1M context, optimized routing"
+                "Zhipu AI GLM-5.3 International - Global access with 1M context, optimized routing"
             }
         }
     }
@@ -131,7 +131,7 @@ impl ZaiTemplate {
             env.insert("ANTHROPIC_MODEL".to_string(), model_name.clone());
             env.insert(
                 "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
-                "glm-5.2".to_string(),
+                "glm-5.3".to_string(),
             );
             env.insert(
                 "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
@@ -291,20 +291,20 @@ mod tests {
     fn zai_defaults_to_1m_context() {
         let settings = ZaiTemplate::china().create_settings("sk-test", &SnapshotScope::Common);
 
-        assert_eq!(settings.model.as_deref(), Some("glm-5.2[1m]"));
+        assert_eq!(settings.model.as_deref(), Some("glm-5.3[1m]"));
         let env = settings.env.unwrap();
         assert_eq!(
             env.get("ANTHROPIC_MODEL").map(String::as_str),
-            Some("glm-5.2[1m]")
+            Some("glm-5.3[1m]")
         );
         assert_eq!(
             env.get("ANTHROPIC_DEFAULT_SONNET_MODEL")
                 .map(String::as_str),
-            Some("glm-5.2")
+            Some("glm-5.3")
         );
         assert_eq!(
             env.get("ANTHROPIC_DEFAULT_OPUS_MODEL").map(String::as_str),
-            Some("glm-5.2")
+            Some("glm-5.3")
         );
         assert_eq!(
             env.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW")
@@ -323,11 +323,11 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(settings.model.as_deref(), Some("glm-5.2[1m]"));
+        assert_eq!(settings.model.as_deref(), Some("glm-5.3[1m]"));
         let env = settings.env.unwrap();
         assert_eq!(
             env.get("ANTHROPIC_MODEL").map(String::as_str),
-            Some("glm-5.2[1m]")
+            Some("glm-5.3[1m]")
         );
         assert_eq!(
             env.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW")
@@ -346,11 +346,11 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(settings.model.as_deref(), Some("glm-5.2[1m]"));
+        assert_eq!(settings.model.as_deref(), Some("glm-5.3[1m]"));
         let env = settings.env.unwrap();
         assert_eq!(
             env.get("ANTHROPIC_MODEL").map(String::as_str),
-            Some("glm-5.2[1m]")
+            Some("glm-5.3[1m]")
         );
         assert_eq!(
             env.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW")
