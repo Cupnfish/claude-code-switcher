@@ -11,9 +11,16 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub struct SeedCodeTemplate;
 
+/// Seed Code (Doubao) model served by the Volcengine endpoint.
+pub const SEED_CODE_MODEL_PRESETS: &[&str] = &["doubao-seed-code-preview-latest"];
+
 impl Template for SeedCodeTemplate {
     fn template_type(&self) -> crate::templates::TemplateType {
         crate::templates::TemplateType::SeedCode
+    }
+
+    fn model_presets(&self) -> &'static [&'static str] {
+        SEED_CODE_MODEL_PRESETS
     }
 
     fn env_var_names(&self) -> Vec<&'static str> {

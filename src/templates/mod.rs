@@ -160,6 +160,17 @@ impl std::str::FromStr for AutoCompactWindow {
     }
 }
 
+/// Model presets shared by Anthropic-compatible relay templates: the Claude
+/// family those providers serve. Providers with their own model families
+/// override [`Template::model_presets`].
+pub const CLAUDE_MODEL_PRESETS: &[&str] = &[
+    "claude-fable-5[1m]",
+    "claude-opus-5[1m]",
+    "claude-sonnet-5[1m]",
+    "claude-opus-4-8[1m]",
+    "claude-haiku-4-5",
+];
+
 /// Trait that all AI provider templates must implement
 pub trait Template {
     /// Get the template type identifier
@@ -167,6 +178,14 @@ pub trait Template {
 
     /// Get all supported environment variable names for this provider
     fn env_var_names(&self) -> Vec<&'static str>;
+
+    /// Curated model presets offered by the TUI model editor for this
+    /// provider. These are the models the provider is known to serve beyond
+    /// its template defaults; `Custom…` covers everything else. The default
+    /// fits Anthropic-compatible relays — override for own-family providers.
+    fn model_presets(&self) -> &'static [&'static str] {
+        CLAUDE_MODEL_PRESETS
+    }
 
     /// Create Claude settings for this template
     fn create_settings(&self, api_key: &str, scope: &SnapshotScope) -> ClaudeSettings;
@@ -362,10 +381,8 @@ impl std::str::FromStr for TemplateType {
             "openrouter" | "or" => Ok(TemplateType::OpenRouter),
             "beeapi" | "bee" => Ok(TemplateType::BeeApi),
             "day77" => Ok(TemplateType::Day77),
-            "qianwen" | "qwen" | "qw" | "qwen-token-plan" | "qianwen-token-plan"
-            | "qwen-tp" | "qwen-payg" | "qianwen-payg" | "dashscope" => {
-                Ok(TemplateType::Qianwen)
-            }
+            "qianwen" | "qwen" | "qw" | "qwen-token-plan" | "qianwen-token-plan" | "qwen-tp"
+            | "qwen-payg" | "qianwen-payg" | "dashscope" => Ok(TemplateType::Qianwen),
             _ => Err(anyhow!(
                 "Unknown template: {}. Available templates: deepseek, glm, k2, k2-thinking, kat-coder, kimi, longcat, fishtrip, fish, minimax, seed-code, zenmux, duojie, anyrouter, openrouter, beeapi, day77, qianwen",
                 s
@@ -566,9 +583,7 @@ pub fn resolve_template_interactive(
         TemplateType::OpenRouter => Ok(Box::new(
             openrouter::OpenRouterTemplate::create_with_model_selection()?,
         )),
-        TemplateType::Qianwen => Ok(Box::new(
-            qianwen::QianwenTemplate::create_interactively()?,
-        )),
+        TemplateType::Qianwen => Ok(Box::new(qianwen::QianwenTemplate::create_interactively()?)),
         _ => Ok(initial),
     }
 }
@@ -662,10 +677,10 @@ pub mod kimi; // Unified module for all Moonshot services
 pub mod longcat;
 pub mod minimax;
 pub mod openrouter;
+pub mod qianwen;
 pub mod seed_code;
 pub mod zai;
 pub mod zenmux;
-pub mod qianwen;
 
 // Re-export for backward compatibility
 pub use anyrouter::*;
@@ -679,7 +694,29 @@ pub use kimi::*; // Includes legacy k2 functions
 pub use longcat::*;
 pub use minimax::*;
 pub use openrouter::*;
+pub use qianwen::*;
 pub use seed_code::*;
 pub use zai::*;
 pub use zenmux::*;
-pub use qianwen::*;
+
+#[cfg(test)]
+mod model_presets_tests {
+    use super::*;
+
+    /// Relay templates keep the shared Claude-family default.
+    #[test]
+    fn relay_templates_default_to_claude_presets() {
+        assert_eq!(beeapi::BeeApiTemplate.model_presets(), CLAUDE_MODEL_PRESETS);
+    }
+
+    /// Providers with their own model families override the default.
+    #[test]
+    fn own_family_templates_override_presets() {
+        assert_eq!(zai::ZaiTemplate::china().model_presets(), ZAI_MODEL_PRESETS);
+        assert!(!ZAI_MODEL_PRESETS.contains(&"claude-opus-5[1m]"));
+        assert_eq!(
+            deepseek::DeepSeekTemplate.model_presets(),
+            DEEPSEEK_MODEL_PRESETS
+        );
+    }
+}

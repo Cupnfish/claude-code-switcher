@@ -66,9 +66,16 @@ impl KatCoderTemplate {
     }
 }
 
+/// KAT-Coder models offered by the endpoint.
+pub const KAT_CODER_MODEL_PRESETS: &[&str] = &["KAT-Coder-Pro-V1", "KAT-Coder-Air-V1"];
+
 impl Template for KatCoderTemplate {
     fn template_type(&self) -> crate::templates::TemplateType {
         crate::templates::TemplateType::KatCoder
+    }
+
+    fn model_presets(&self) -> &'static [&'static str] {
+        KAT_CODER_MODEL_PRESETS
     }
 
     fn env_var_names(&self) -> Vec<&'static str> {

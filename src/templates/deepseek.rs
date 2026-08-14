@@ -11,9 +11,16 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub struct DeepSeekTemplate;
 
+/// DeepSeek models offered by the Anthropic-compatible endpoint.
+pub const DEEPSEEK_MODEL_PRESETS: &[&str] = &["deepseek-v4-pro[1m]", "deepseek-v4-flash"];
+
 impl Template for DeepSeekTemplate {
     fn template_type(&self) -> crate::templates::TemplateType {
         crate::templates::TemplateType::DeepSeek
+    }
+
+    fn model_presets(&self) -> &'static [&'static str] {
+        DEEPSEEK_MODEL_PRESETS
     }
 
     fn env_var_names(&self) -> Vec<&'static str> {

@@ -104,9 +104,16 @@ impl Default for QianwenTemplate {
     }
 }
 
+/// Qianwen model served by the Anthropic-compatible endpoint.
+pub const QIANWEN_MODEL_PRESETS: &[&str] = &["qwen3.8-max-preview"];
+
 impl Template for QianwenTemplate {
     fn template_type(&self) -> crate::templates::TemplateType {
         crate::templates::TemplateType::Qianwen
+    }
+
+    fn model_presets(&self) -> &'static [&'static str] {
+        QIANWEN_MODEL_PRESETS
     }
 
     fn env_var_names(&self) -> Vec<&'static str> {
@@ -287,7 +294,8 @@ mod tests {
             Some("qwen3.8-max-preview")
         );
         assert_eq!(
-            env.get("ANTHROPIC_DEFAULT_SONNET_MODEL").map(String::as_str),
+            env.get("ANTHROPIC_DEFAULT_SONNET_MODEL")
+                .map(String::as_str),
             Some("qwen3.8-max-preview")
         );
         assert_eq!(
@@ -299,7 +307,8 @@ mod tests {
             Some("qwen3.8-max-preview")
         );
         assert_eq!(
-            env.get("CLAUDE_CODE_MAX_CONTEXT_TOKENS").map(String::as_str),
+            env.get("CLAUDE_CODE_MAX_CONTEXT_TOKENS")
+                .map(String::as_str),
             Some("983616")
         );
         assert_eq!(env.get("ENABLE_THINKING").map(String::as_str), Some("true"));
@@ -307,8 +316,8 @@ mod tests {
 
     #[test]
     fn pay_as_you_go_uses_dashscope_and_qwen38_max_preview() {
-        let settings = QianwenTemplate::pay_as_you_go()
-            .create_settings("sk-test", &SnapshotScope::Common);
+        let settings =
+            QianwenTemplate::pay_as_you_go().create_settings("sk-test", &SnapshotScope::Common);
 
         assert_eq!(settings.model.as_deref(), Some("qwen3.8-max-preview"));
         let env = settings.env.unwrap();

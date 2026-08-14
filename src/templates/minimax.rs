@@ -68,9 +68,16 @@ impl Default for MiniMaxTemplate {
     }
 }
 
+/// MiniMax model served by the Anthropic-compatible endpoint.
+pub const MINIMAX_MODEL_PRESETS: &[&str] = &["MiniMax-M2.5"];
+
 impl Template for MiniMaxTemplate {
     fn template_type(&self) -> crate::templates::TemplateType {
         crate::templates::TemplateType::MiniMax
+    }
+
+    fn model_presets(&self) -> &'static [&'static str] {
+        MINIMAX_MODEL_PRESETS
     }
 
     fn env_var_names(&self) -> Vec<&'static str> {

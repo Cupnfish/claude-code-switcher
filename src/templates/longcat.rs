@@ -11,9 +11,16 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub struct LongcatTemplate;
 
+/// LongCat model served by the endpoint.
+pub const LONGCAT_MODEL_PRESETS: &[&str] = &["LongCat-Flash-Chat"];
+
 impl Template for LongcatTemplate {
     fn template_type(&self) -> crate::templates::TemplateType {
         crate::templates::TemplateType::Longcat
+    }
+
+    fn model_presets(&self) -> &'static [&'static str] {
+        LONGCAT_MODEL_PRESETS
     }
 
     fn env_var_names(&self) -> Vec<&'static str> {

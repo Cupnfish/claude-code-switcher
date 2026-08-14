@@ -58,41 +58,23 @@ pub enum Mode {
     Message(String),
 }
 
-/// Curated model presets offered for every tier, derived from the models the
-/// built-in templates already use. A `Custom…` entry lets the user type any
-/// model string on top of these.
-const MODEL_PRESETS: &[&str] = &[
-    "claude-fable-5[1m]",
-    "claude-opus-5[1m]",
-    "claude-sonnet-5[1m]",
-    "claude-opus-4-8[1m]",
-    "claude-haiku-4-5",
-    "glm-5.3[1m]",
-    "glm-5.3",
-    "deepseek-v4-pro[1m]",
-    "qwen3.8-max-preview",
-    "kimi-k2.7-code",
-    "MiniMax-M2.5",
-    "LongCat-Flash-Chat",
-];
 const TEMPLATE_DEFAULT_LABEL: &str = "(template default)";
 /// Label of the "Custom…" entry; shared with the view for live custom input.
 pub const CUSTOM_LABEL: &str = "Custom…";
 
-/// Index of the "Custom…" entry in a tier's option list.
-const CUSTOM_IDX: usize = 1 + MODEL_PRESETS.len();
-
 /// Per-tier state for the model editor sub-screen.
 ///
-/// Each tier cycles an option list of `[template default, …presets, Custom…]`.
-/// `tier_idx == 0` means "no override" (keep the template's value); the last
-/// index means "Custom" and uses `tier_custom`.
+/// Each tier cycles an option list of `[template default, …presets, Custom…]`,
+/// where the presets come from the focused template's
+/// [`crate::templates::Template::model_presets`]. `tier_idx == 0` means "no
+/// override" (keep the template's value); the last index means "Custom" and
+/// uses `tier_custom`.
 pub struct ModelEditorState {
     /// Focused row: 0..4 = a tier, 4 = the Done row.
     pub tier_cursor: usize,
     /// Selected option index per tier.
     tier_idx: [usize; 4],
-    /// Committed custom value per tier (used when `tier_idx == CUSTOM_IDX`).
+    /// Committed custom value per tier (used when `tier_idx == custom_idx()`).
     tier_custom: [Option<String>; 4],
     /// The template's own value per tier, for the `(template: …)` hint.
     pub tier_defaults: [String; 4],
@@ -100,26 +82,39 @@ pub struct ModelEditorState {
     pub custom_input: Option<(usize, TextInput)>,
     /// The override as it was when the editor opened; Esc restores this.
     committed: ModelOverride,
+    /// Model presets offered by the current template (see
+    /// [`crate::templates::Template::model_presets`]).
+    presets: &'static [&'static str],
 }
 
 impl ModelEditorState {
-    fn cycle_len() -> usize {
-        CUSTOM_IDX + 1
+    /// Index of the "Custom…" entry in a tier's option list.
+    fn custom_idx(&self) -> usize {
+        1 + self.presets.len()
     }
 
-    /// Build editor state from the template's per-tier defaults and the current
-    /// committed override.
-    fn from_override(tier_defaults: [String; 4], ov: &ModelOverride) -> Self {
+    /// Number of entries a tier cycles through.
+    fn cycle_len(&self) -> usize {
+        self.custom_idx() + 1
+    }
+
+    /// Build editor state from the template's per-tier defaults, its model
+    /// presets, and the current committed override.
+    fn from_override(
+        tier_defaults: [String; 4],
+        presets: &'static [&'static str],
+        ov: &ModelOverride,
+    ) -> Self {
         let mut tier_idx = [0usize; 4];
         let mut tier_custom: [Option<String>; 4] = [None, None, None, None];
         for (i, tier) in ModelTier::ALL.iter().enumerate() {
             match ov.get(*tier) {
                 None => {} // idx 0 = template default
                 Some(value) => {
-                    if let Some(pos) = MODEL_PRESETS.iter().position(|p| *p == value) {
+                    if let Some(pos) = presets.iter().position(|p| *p == value) {
                         tier_idx[i] = 1 + pos;
                     } else {
-                        tier_idx[i] = CUSTOM_IDX;
+                        tier_idx[i] = 1 + presets.len();
                         tier_custom[i] = Some(value.to_string());
                     }
                 }
@@ -132,6 +127,7 @@ impl ModelEditorState {
             tier_defaults,
             custom_input: None,
             committed: ov.clone(),
+            presets,
         }
     }
 
@@ -145,11 +141,11 @@ impl ModelEditorState {
         let i = tier.as_index();
         match self.tier_idx[i] {
             0 => TEMPLATE_DEFAULT_LABEL.to_string(),
-            idx if idx == CUSTOM_IDX => match &self.tier_custom[i] {
+            idx if idx == self.custom_idx() => match &self.tier_custom[i] {
                 Some(v) if !v.is_empty() => format!("Custom: {v}"),
                 _ => CUSTOM_LABEL.to_string(),
             },
-            idx => MODEL_PRESETS[idx - 1].to_string(),
+            idx => self.presets[idx - 1].to_string(),
         }
     }
 
@@ -160,12 +156,12 @@ impl ModelEditorState {
             let i = tier.as_index();
             let value = match self.tier_idx[i] {
                 0 => None,
-                idx if idx == CUSTOM_IDX => self.tier_custom[i]
+                idx if idx == self.custom_idx() => self.tier_custom[i]
                     .as_deref()
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
                     .map(str::to_string),
-                idx => Some(MODEL_PRESETS[idx - 1].to_string()),
+                idx => Some(self.presets[idx - 1].to_string()),
             };
             ov.set(tier, value);
         }
@@ -895,8 +891,10 @@ impl App {
                 .cloned()
                 .unwrap_or_default(),
         ];
+        let presets = inst.model_presets();
         self.mode = Mode::ModelEditor(Box::new(ModelEditorState::from_override(
             tier_defaults,
+            presets,
             &self.model_override,
         )));
     }
@@ -949,7 +947,7 @@ impl App {
             return Outcome::Continue;
         }
 
-        let cycle_len = ModelEditorState::cycle_len() as i32;
+        let cycle_len = state.cycle_len() as i32;
         let n_tiers = ModelTier::ALL.len();
         match key.code {
             KeyCode::Up => {
@@ -976,7 +974,7 @@ impl App {
                     self.model_override = state.resolve();
                     self.mode = Mode::Normal;
                     return Outcome::Continue;
-                } else if state.tier_idx[state.tier_cursor] == CUSTOM_IDX {
+                } else if state.tier_idx[state.tier_cursor] == state.custom_idx() {
                     // Open custom text input, pre-filled with any existing value.
                     let prefill = state.tier_custom[state.tier_cursor]
                         .clone()
@@ -1193,6 +1191,7 @@ mod snapshot_tests {
     use super::*;
     use crate::credentials::CredentialData;
     use crate::templates::TemplateType;
+    use crate::templates::zai::ZAI_MODEL_PRESETS;
     use crate::usage::{UsageReport, UsageStatus};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::{Terminal, backend::TestBackend, layout::Position};
@@ -1397,7 +1396,7 @@ mod snapshot_tests {
         app.handle_event(key(KeyCode::Down)); // focus Opus
         app.handle_event(key(KeyCode::Right)); // Opus -> first preset
         app.handle_event(key(KeyCode::Up)); // back to Primary
-        for _ in 0..(MODEL_PRESETS.len() as i32 + 1) {
+        for _ in 0..(ZAI_MODEL_PRESETS.len() as i32 + 1) {
             app.handle_event(key(KeyCode::Right)); // Primary -> Custom…
         }
         app.handle_event(key(KeyCode::Enter)); // open custom input
@@ -1541,7 +1540,7 @@ mod snapshot_tests {
 
         // Focus Opus (tier_cursor 1) and cycle to the first preset.
         app.handle_event(key(KeyCode::Down));
-        app.handle_event(key(KeyCode::Right)); // idx 1 == MODEL_PRESETS[0]
+        app.handle_event(key(KeyCode::Right)); // idx 1 == ZAI_MODEL_PRESETS[0]
         // Navigate to Done (tier_cursor 4) and commit.
         app.handle_event(key(KeyCode::Down));
         app.handle_event(key(KeyCode::Down));
@@ -1551,14 +1550,14 @@ mod snapshot_tests {
         assert!(matches!(app.mode, Mode::Normal));
         assert_eq!(
             app.model_override.get(ModelTier::Opus),
-            Some(MODEL_PRESETS[0]),
+            Some(ZAI_MODEL_PRESETS[0]),
             "cycled Opus tier should be the first preset"
         );
         // Other tiers left at template default.
         assert!(app.model_override.get(ModelTier::Primary).is_none());
         assert!(
             app.model_summary()
-                .contains(&format!("Opus:{}", MODEL_PRESETS[0]))
+                .contains(&format!("Opus:{}", ZAI_MODEL_PRESETS[0]))
         );
     }
 
@@ -1605,7 +1604,7 @@ mod snapshot_tests {
         assert!(matches!(app.mode, Mode::Normal));
         assert_eq!(
             app.model_override.get(ModelTier::Opus),
-            Some(MODEL_PRESETS[0]),
+            Some(ZAI_MODEL_PRESETS[0]),
             "Esc should restore the override as it was when the editor opened"
         );
     }
@@ -1616,7 +1615,7 @@ mod snapshot_tests {
         app.cursor = 4;
         app.handle_event(key(KeyCode::Enter)); // open editor (Primary focused)
         // Cycle Primary all the way to the Custom… entry.
-        for _ in 0..(MODEL_PRESETS.len() as i32 + 1) {
+        for _ in 0..(ZAI_MODEL_PRESETS.len() as i32 + 1) {
             app.handle_event(key(KeyCode::Right));
         }
         app.handle_event(key(KeyCode::Enter)); // open custom text input
@@ -1642,7 +1641,7 @@ mod snapshot_tests {
         let mut app = base_app();
         app.cursor = 4;
         app.handle_event(key(KeyCode::Enter)); // open editor (Primary focused)
-        for _ in 0..(MODEL_PRESETS.len() as i32 + 1) {
+        for _ in 0..(ZAI_MODEL_PRESETS.len() as i32 + 1) {
             app.handle_event(key(KeyCode::Right)); // cycle to Custom…
         }
         app.handle_event(key(KeyCode::Enter)); // open custom input

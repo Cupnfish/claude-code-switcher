@@ -23,9 +23,16 @@ impl Default for ZenmuxTemplate {
     }
 }
 
+/// Free-tier models served by the Zenmux relay.
+pub const ZENMUX_MODEL_PRESETS: &[&str] = &["google/gemini-3-pro-preview-free"];
+
 impl Template for ZenmuxTemplate {
     fn template_type(&self) -> crate::templates::TemplateType {
         crate::templates::TemplateType::Zenmux
+    }
+
+    fn model_presets(&self) -> &'static [&'static str] {
+        ZENMUX_MODEL_PRESETS
     }
 
     fn env_var_names(&self) -> Vec<&'static str> {

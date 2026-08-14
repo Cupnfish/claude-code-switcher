@@ -11,9 +11,16 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub struct Day77Template;
 
+/// Kimi model served by the Day77 relay.
+pub const DAY77_MODEL_PRESETS: &[&str] = &["kimi-k2.7-code"];
+
 impl Template for Day77Template {
     fn template_type(&self) -> crate::templates::TemplateType {
         crate::templates::TemplateType::Day77
+    }
+
+    fn model_presets(&self) -> &'static [&'static str] {
+        DAY77_MODEL_PRESETS
     }
 
     fn env_var_names(&self) -> Vec<&'static str> {
@@ -58,10 +65,7 @@ impl Template for Day77Template {
                 "ANTHROPIC_BASE_URL".to_string(),
                 "https://api.day77.icu".to_string(),
             );
-            env.insert(
-                "ANTHROPIC_MODEL".to_string(),
-                "kimi-k2.7-code".to_string(),
-            );
+            env.insert("ANTHROPIC_MODEL".to_string(), "kimi-k2.7-code".to_string());
             env.insert(
                 "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
                 "kimi-k2.7-code".to_string(),

@@ -120,9 +120,20 @@ impl KimiTemplate {
     }
 }
 
+/// Kimi models offered by the Anthropic-compatible endpoint.
+pub const KIMI_MODEL_PRESETS: &[&str] = &[
+    "kimi-for-coding",
+    "kimi-k2-thinking",
+    "kimi-k2-0905-preview",
+];
+
 impl Template for KimiTemplate {
     fn template_type(&self) -> crate::templates::TemplateType {
         crate::templates::TemplateType::Kimi
+    }
+
+    fn model_presets(&self) -> &'static [&'static str] {
+        KIMI_MODEL_PRESETS
     }
 
     fn env_var_names(&self) -> Vec<&'static str> {

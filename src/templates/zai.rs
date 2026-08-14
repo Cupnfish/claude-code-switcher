@@ -171,9 +171,17 @@ impl ZaiTemplate {
     }
 }
 
+/// GLM models offered by the ZAI Anthropic-compatible endpoints (current
+/// generation first; the previous generation is still served).
+pub const ZAI_MODEL_PRESETS: &[&str] = &["glm-5.3[1m]", "glm-5.3", "glm-5.2[1m]", "glm-5.2"];
+
 impl Template for ZaiTemplate {
     fn template_type(&self) -> crate::templates::TemplateType {
         crate::templates::TemplateType::Zai
+    }
+
+    fn model_presets(&self) -> &'static [&'static str] {
+        ZAI_MODEL_PRESETS
     }
 
     fn env_var_names(&self) -> Vec<&'static str> {
